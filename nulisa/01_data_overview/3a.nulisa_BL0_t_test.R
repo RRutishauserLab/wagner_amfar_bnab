@@ -4,10 +4,10 @@ library(dplyr)
 library(ggplot2)
 library(ggforce)
 
-setwd("~/Dropbox (Gladstone)/GB-JW-1447/data/")
-plot_dir <- "~/Dropbox (Gladstone)/GB-JW-1447/results/nulisa/plots"
-table_dir <- "~/Dropbox (Gladstone)/GB-JW-1447/results/nulisa/tables"
-data_dir <- "~/Dropbox (Gladstone)/GB-JW-1447/data"
+setwd("~/Gladstone Dropbox/Michela Traglia/GB-JW-1447/data/")
+plot_dir <- "~/Gladstone Dropbox/Michela Traglia/GB-JW-1447/results/nulisa/plots"
+table_dir <- "~/Gladstone Dropbox/Michela Traglia/GB-JW-1447/results/nulisa/tables"
+data_dir <- "~/Gladstone Dropbox/Michela Traglia/GB-JW-1447/data"
 
 #uploading the nulisa seq dataset
 nulisa <- read_excel(paste0(data_dir,"/NULISA.xlsx"), sheet="NPQ Counts")
@@ -58,9 +58,15 @@ print(p) %>%   ggsave(., filename = paste0(plot_dir,"/boxplot/nulisa_seq_BL0_con
 ##BL0 is sign different in controllers vs non controllers, non controllers showed higher mean overall across targets, BL0 should be included in downstream models.
 
 #all targets
-p <- ggplot(nulisa_subset, aes(x=as.character(status), y=NPQ)) + 
-  geom_boxplot(aes(fill=Target))
-p <- p + facet_wrap_paginate(~ Target, ncol = 4, nrow = 4)
+
+
+
+#for each target extract the timepoint
+
+
+p <- ggplot(nulisa_subset, aes(x=as.character(status), y=NPQ, fill=Target, color=as.character(status))) + 
+  geom_boxplot(aes(fill=as.character(status)))
+p <- p + facet_wrap(~Target)
 p <- p + guides(fill="none")
 
 for(i in 1:n_pages(p)){

@@ -821,12 +821,13 @@ if(anova_summary_df_no2523_no2887$anova_quadratic_p <=0.05){
     
  anova_summary_adj <-  arrange(anova_summary, anova_linear_p) %>% 
                          mutate(anova_linear_BH_p = p.adjust(anova_linear_p, method="BH")) %>%
-                         mutate(anova_linear_q = qvalue(anova_linear_p)$qvalue)%>%
-                         mutate(anova_linear_lfdr = qvalue(anova_linear_p)$lfdr)%>%
-                         mutate(anova_quadratic_BH_p = p.adjust(anova_quadratic_p, method="BH")) %>%
-                         mutate(anova_quadratic_q = qvalue(anova_quadratic_p)$qvalue) %>%
-                         mutate(anova_quadratic_lfdr = qvalue(anova_quadratic_p)$lfdr)     
-    anova_summary_sorted <- anova_summary_no2523_adj %>% arrange(anova_linear_lfdr)
+                         #mutate(anova_linear_q = qvalue(anova_linear_p)$qvalue)%>%
+                         #mutate(anova_linear_lfdr = qvalue(anova_linear_p)$lfdr)%>%
+                         mutate(anova_quadratic_BH_p = p.adjust(anova_quadratic_p, method="BH")) #%>%
+                         #mutate(anova_quadratic_q = qvalue(anova_quadratic_p)$qvalue) %>%
+                         #mutate(anova_quadratic_lfdr = qvalue(anova_quadratic_p)$lfdr)     
+   # anova_summary_sorted <- anova_summary_adj %>% arrange(anova_linear_lfdr)
+    anova_summary_sorted <- anova_summary_adj %>% arrange(anova_linear_p)
   
     write.csv(anova_summary_sorted, file=paste0(table_dir,"/lmer_quadratic_models/timepoint_in_days/days_postATI/preATI_up_to70_days_postATI_association_between_target_timepoint_timepoint2_by_status_p_adjusted.csv"), row.names=F, quote=F)
 
@@ -834,24 +835,26 @@ if(anova_summary_df_no2523_no2887$anova_quadratic_p <=0.05){
    
     anova_summary_no2523_adj <-  arrange(anova_summary_no2523, anova_linear_p) %>% 
                          mutate(anova_linear_BH_p = p.adjust(anova_linear_p, method="BH")) %>%
-                         mutate(anova_linear_q = qvalue(anova_linear_p)$qvalue)%>%
-                         mutate(anova_linear_lfdr = qvalue(anova_linear_p)$lfdr)%>%
-                         mutate(anova_quadratic_BH_p = p.adjust(anova_quadratic_p, method="BH")) %>%
-                         mutate(anova_quadratic_q = qvalue(anova_quadratic_p)$qvalue) %>%
-                         mutate(anova_quadratic_lfdr = qvalue(anova_quadratic_p)$lfdr)     
-    anova_summary_no2523_sorted <- anova_summary_no2523_adj %>% arrange(anova_linear_lfdr)
+                         #mutate(anova_linear_q = qvalue(anova_linear_p)$qvalue)%>%
+                         #mutate(anova_linear_lfdr = qvalue(anova_linear_p)$lfdr)%>%
+                         mutate(anova_quadratic_BH_p = p.adjust(anova_quadratic_p, method="BH")) #%>%
+                         #mutate(anova_quadratic_q = qvalue(anova_quadratic_p)$qvalue) %>%
+                         #mutate(anova_quadratic_lfdr = qvalue(anova_quadratic_p)$lfdr)     
+    #anova_summary_no2523_sorted <- anova_summary_no2523_adj %>% arrange(anova_linear_lfdr)
+    anova_summary_no2523_sorted <- anova_summary_no2523_adj %>% arrange(anova_linear_p)
   
     write.csv(anova_summary_no2523_sorted, file=paste0(table_dir,"/lmer_quadratic_models/timepoint_in_days/days_postATI/preATI_up_to70_days_postATI_association_between_target_timepoint_timepoint2_by_status_p_adjusted_no2523.csv"), row.names=F, quote=F)
 
     anova_summary_no2523_no2887_adj <-  arrange(anova_summary_no2523_no2887, anova_linear_p) %>% 
                          mutate(anova_linear_BH_p = p.adjust(anova_linear_p, method="BH")) %>%
-                         mutate(anova_linear_q = qvalue(anova_linear_p)$qvalue)%>%
-                         mutate(anova_linear_lfdr = qvalue(anova_linear_p)$lfdr)%>%
-                         mutate(anova_quadratic_BH_p = p.adjust(anova_quadratic_p, method="BH")) %>%
-                         mutate(anova_quadratic_q = qvalue(anova_quadratic_p)$qvalue) %>%
-                         mutate(anova_quadratic_lfdr = qvalue(anova_quadratic_p)$lfdr)     
+                         #amutate(anova_linear_q = qvalue(anova_linear_p)$qvalue)%>%
+                         #amutate(anova_linear_lfdr = qvalue(anova_linear_p)$lfdr)%>%
+                         mutate(anova_quadratic_BH_p = p.adjust(anova_quadratic_p, method="BH")) #a%>%
+                         #amutate(anova_quadratic_q = qvalue(anova_quadratic_p)$qvalue) %>%
+                         #amutate(anova_quadratic_lfdr = qvalue(anova_quadratic_p)$lfdr)     
 
-anova_summary_no2523_no2887_sorted <- anova_summary_no2523_no2887_adj %>% arrange(anova_linear_lfdr)
+#aanova_summary_no2523_no2887_sorted <- anova_summary_no2523_no2887_adj %>% arrange(anova_linear_lfdr)
+anova_summary_no2523_no2887_sorted <- anova_summary_no2523_no2887_adj %>% arrange(anova_linear_p)
   
     write.csv(anova_summary_no2523_no2887_sorted, file=paste0(table_dir,"/lmer_quadratic_models/timepoint_in_days/days_postATI/preATI_up_to70_days_postATI_association_between_target_timepoint_timepoint2_by_status_p_adjusted_no2523_no2887.csv"), row.names=F, quote=F)
 

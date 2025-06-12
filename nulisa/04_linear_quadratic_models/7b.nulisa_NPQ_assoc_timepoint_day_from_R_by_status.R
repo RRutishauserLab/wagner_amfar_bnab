@@ -10,6 +10,7 @@ library(lmtest)
 library(tidyr)
 library(factoextra)
 library(qvalue)
+library(stringr)
 
 
 
@@ -17,6 +18,9 @@ setwd("~/Dropbox (Gladstone)/GB-JW-1447/data/")
 plot_dir <- "~/Dropbox (Gladstone)/GB-JW-1447/results/nulisa/plots"
 table_dir <- "~/Dropbox (Gladstone)/GB-JW-1447/results/nulisa/tables"
 data_dir <- "~/Dropbox (Gladstone)/GB-JW-1447/data"
+if (!dir.exists(paste0(plot_dir,"/lmer_quadratic_models_NPQ/timepoint_in_days/days_from_R/linear"))) {dir.create(paste0(plot_dir,"/lmer_quadratic_models_NPQ/timepoint_in_days/days_from_R/linear"), recursive=T)}  
+if (!dir.exists(paste0(plot_dir,"/lmer_quadratic_models_NPQ/timepoint_in_days/days_from_R/quadratic"))) {dir.create(paste0(plot_dir,"/lmer_quadratic_models_NPQ/timepoint_in_days/days_from_R/quadratic"), recursive=T)}  
+if (!dir.exists(paste0(table_dir,"/lmer_quadratic_models_NPQ/timepoint_in_days/days_from_R"))) {dir.create(paste0(table_dir,"/lmer_quadratic_models_NPQ/timepoint_in_days/days_from_R"), recursive=T)}  
 
 #uploading the nulisa seq dataset
 nulisa <- read_excel(paste0(data_dir,"/NULISA.xlsx"), sheet="NPQ Counts")
@@ -168,12 +172,21 @@ nulisa_baseline0_target <-  nulisa_baseline0 %>% dplyr::filter(Target %in% targe
                              dplyr::filter(PID %in% pid_list[pid]) %>% 
                              dplyr::select(NPQ) 
   
+  nulisa_target_NPQ <-  
+                nulisa_target %>% 
+                dplyr::filter(PID %in% pid_list[pid]) %>% 
+                 as.data.frame()
+   
+  
+
+  
   nulisa_target_NPQ_df <- data.frame(target=target_list[tar], 
                                                       PID=as.character(pid_list[pid]), 
-                                                      timepoint=nulisa_target$timepoint,
-                                                      status=nulisa_target$status,
-                                                      NPQ=nulisa_target$NPQ
+                                                      timepoint=nulisa_target_NPQ$timepoint,
+                                                      status=nulisa_target_NPQ$status,
+                                                      NPQ=nulisa_target_NPQ$NPQ
                                                        )
+ #adding the covariates
   #adding the covariates
   nulisa_target_NPQ_dff_w_covar_pid <- full_join(nulisa_target_NPQ_df,covariatesForUnivariate_PID_subset, by="PID" )      
   #all timepoint for one given protein

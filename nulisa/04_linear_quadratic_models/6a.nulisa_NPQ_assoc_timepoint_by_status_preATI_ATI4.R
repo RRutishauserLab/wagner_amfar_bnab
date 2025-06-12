@@ -10,12 +10,17 @@ library(lmtest)
 library(tidyr)
 library(factoextra)
 library(qvalue)
+library(stringr)
 
 
 setwd("~/Dropbox (Gladstone)/GB-JW-1447/data/")
 plot_dir <- "~/Dropbox (Gladstone)/GB-JW-1447/results/nulisa/plots"
 table_dir <- "~/Dropbox (Gladstone)/GB-JW-1447/results/nulisa/tables"
 data_dir <- "~/Dropbox (Gladstone)/GB-JW-1447/data"
+
+if (!dir.exists(paste0(plot_dir,"/lmer_quadratic_models_NPQ/timepoint_ordinal/quadratic"))) {dir.create(paste0(plot_dir,"/lmer_quadratic_models_NPQ/timepoint_ordinal/quadratic"), recursive=T)}  
+if (!dir.exists(paste0(plot_dir,"/lmer_quadratic_models_NPQ/timepoint_ordinal/linear"))) {dir.create(paste0(plot_dir,"/lmer_quadratic_models_NPQ/timepoint_ordinal/linear"), recursive=T)}  
+if (!dir.exists(paste0(table_dir,"/lmer_quadratic_models_NPQ/timepoint_ordinal"))) {dir.create(paste0(table_dir,"/lmer_quadratic_models_NPQ/timepoint_ordinal"), recursive=T)}  
 
 #uploading the nulisa seq dataset
 nulisa <- read_excel(paste0(data_dir,"/NULISA.xlsx"), sheet="NPQ Counts")
@@ -164,12 +169,23 @@ nulisa_target <- nulisa_all_t %>%  dplyr::filter(Target %in% target_list[tar])
   
 
   
+  
+  nulisa_target_NPQ <-  
+                nulisa_target %>% 
+                dplyr::filter(PID %in% pid_list[pid]) %>% 
+                 as.data.frame()
+   
+  
+
+  
   nulisa_target_NPQ_df <- data.frame(target=target_list[tar], 
                                                       PID=as.character(pid_list[pid]), 
-                                                      timepoint=nulisa_target$timepoint,
-                                                      status=nulisa_target$status,
-                                                      NPQ=nulisa_target$NPQ
+                                                      timepoint=nulisa_target_NPQ$timepoint,
+                                                      status=nulisa_target_NPQ$status,
+                                                      NPQ=nulisa_target_NPQ$NPQ
                                                        )
+
+
   #adding the covariates
   nulisa_target_NPQ_dff_w_covar_pid <- full_join(nulisa_target_NPQ_df,covariatesForUnivariate_PID_subset, by="PID" )      
   #all timepoint for one given protein
@@ -792,39 +808,39 @@ if(anova_summary_no2523_no2887_df$anova_linear_p <=0.05){
 #anova_summary$anova_linear_p <- anova_summary$anova_linear_p+0.00000000001
     anova_summary_adj <- arrange(anova_summary, anova_linear_p) %>% 
                          mutate(anova_linear_BH_p = p.adjust(anova_linear_p, method="BH")) %>%
-                         #mutate(anova_linear_q = qvalue(anova_linear_p)$qvalue)%>%
-                         #mutate(anova_linear_lfdr = qvalue(anova_linear_p)$lfdr)%>%
-                         mutate(anova_quadratic_BH_p = p.adjust(anova_quadratic_p, method="BH")) #%>%
-                         #mutate(anova_quadratic_q = qvalue(anova_quadratic_p)$qvalue) %>%
-                         #mutate(anova_quadratic_lfdr = qvalue(anova_quadratic_p)$lfdr) 
+                         mutate(anova_linear_q = qvalue(anova_linear_p)$qvalue)%>%
+                         mutate(anova_linear_lfdr = qvalue(anova_linear_p)$lfdr)%>%
+                         mutate(anova_quadratic_BH_p = p.adjust(anova_quadratic_p, method="BH")) %>%
+                         mutate(anova_quadratic_q = qvalue(anova_quadratic_p)$qvalue) %>%
+                         mutate(anova_quadratic_lfdr = qvalue(anova_quadratic_p)$lfdr) 
                
-    #anova_summary_sorted <- anova_summary_adj %>% arrange(anova_linear_lfdr)
-    anova_summary_sorted <- anova_summary_adj %>% arrange(anova_linear_p)
+   anova_summary_sorted <- anova_summary_adj %>% arrange(anova_linear_lfdr)
+     #anova_summary_sorted <- anova_summary_adj %>% arrange(anova_linear_p)
   
     write.csv(anova_summary_sorted, file=paste0(table_dir,"/lmer_quadratic_models_NPQ/timepoint_ordinal/preATI_ATI4_association_between_target_timepoint_timepoint2_by_status_p_adjusted_all.csv"), row.names=F, quote=F)
 
     anova_summary_no2523_adj <-  arrange(anova_summary_no2523, anova_linear_p) %>% 
                          mutate(anova_linear_BH_p = p.adjust(anova_linear_p, method="BH")) %>%
-                         #mutate(anova_linear_q = qvalue(anova_linear_p)$qvalue)%>%
-                         #mutate(anova_linear_lfdr = qvalue(anova_linear_p)$lfdr)%>%
-                         mutate(anova_quadratic_BH_p = p.adjust(anova_quadratic_p, method="BH")) #%>%
-                         #mutate(anova_quadratic_q = qvalue(anova_quadratic_p)$qvalue) %>%
-                        # mutate(anova_quadratic_lfdr = qvalue(anova_quadratic_p)$lfdr)     
-    #anova_summary_no2523_sorted <- anova_summary_no2523_adj %>% arrange(anova_linear_lfdr)
-    anova_summary_no2523_sorted <- anova_summary_no2523_adj %>% arrange(anova_linear_p)
+                         mutate(anova_linear_q = qvalue(anova_linear_p)$qvalue)%>%
+                         mutate(anova_linear_lfdr = qvalue(anova_linear_p)$lfdr)%>%
+                         mutate(anova_quadratic_BH_p = p.adjust(anova_quadratic_p, method="BH")) %>%
+                         mutate(anova_quadratic_q = qvalue(anova_quadratic_p)$qvalue) %>%
+                         mutate(anova_quadratic_lfdr = qvalue(anova_quadratic_p)$lfdr)     
+    anova_summary_no2523_sorted <- anova_summary_no2523_adj %>% arrange(anova_linear_lfdr)
+     #anova_summary_no2523_sorted <- anova_summary_no2523_adj %>% arrange(anova_linear_p)
   
     write.csv(anova_summary_no2523_sorted, file=paste0(table_dir,"/lmer_quadratic_models_NPQ/timepoint_ordinal/preATI_ATI4_association_between_target_timepoint_timepoint2_by_status_p_adjusted_no2523.csv"), row.names=F, quote=F)
 
     anova_summary_no2523_no2887_adj <-  arrange(anova_summary_no2523_no2887, anova_linear_p) %>% 
                          mutate(anova_linear_BH_p = p.adjust(anova_linear_p, method="BH")) %>%
-                         #mutate(anova_linear_q = qvalue(anova_linear_p)$qvalue)%>%
-                         #mutate(anova_linear_lfdr = qvalue(anova_linear_p)$lfdr)%>%
-                         mutate(anova_quadratic_BH_p = p.adjust(anova_quadratic_p, method="BH")) #%>%
-                         #mutate(anova_quadratic_q = qvalue(anova_quadratic_p)$qvalue) %>%
-                         #mutate(anova_quadratic_lfdr = qvalue(anova_quadratic_p)$lfdr)     
+                         mutate(anova_linear_q = qvalue(anova_linear_p)$qvalue)%>%
+                         mutate(anova_linear_lfdr = qvalue(anova_linear_p)$lfdr)%>%
+                         mutate(anova_quadratic_BH_p = p.adjust(anova_quadratic_p, method="BH")) %>%
+                         mutate(anova_quadratic_q = qvalue(anova_quadratic_p)$qvalue) %>%
+                         mutate(anova_quadratic_lfdr = qvalue(anova_quadratic_p)$lfdr)     
 
- #anova_summary_no2523_no2887_sorted <- anova_summary_no2523_no2887_adj %>% arrange(anova_linear_lfdr)
-  anova_summary_no2523_no2887_sorted <- anova_summary_no2523_no2887_adj %>% arrange(anova_linear_p)
+  anova_summary_no2523_no2887_sorted <- anova_summary_no2523_no2887_adj %>% arrange(anova_linear_lfdr)
+   #anova_summary_no2523_no2887_sorted <- anova_summary_no2523_no2887_adj %>% arrange(anova_linear_p)
   
     write.csv(anova_summary_no2523_no2887_sorted, file=paste0(table_dir,"/lmer_quadratic_models_NPQ/timepoint_ordinal/preATI_ATI4_association_between_target_timepoint_timepoint2_by_status_p_adjusted_no2523_no2887.csv"), row.names=F, quote=F)
 

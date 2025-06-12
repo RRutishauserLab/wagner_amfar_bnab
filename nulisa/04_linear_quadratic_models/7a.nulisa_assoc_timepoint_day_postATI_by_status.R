@@ -17,6 +17,10 @@ plot_dir <- "~/Dropbox (Gladstone)/GB-JW-1447/results/nulisa/plots"
 table_dir <- "~/Dropbox (Gladstone)/GB-JW-1447/results/nulisa/tables"
 data_dir <- "~/Dropbox (Gladstone)/GB-JW-1447/data"
 
+if (!dir.exists(paste0(plot_dir,"/lmer_quadratic_models_NPQ/timepoint_in_days/days_postATI/linear"))) {dir.create(paste0(plot_dir,"/lmer_quadratic_models_NPQ/timepoint_in_days/days_postATI/linear"), recursive=T)}  
+if (!dir.exists(paste0(plot_dir,"/lmer_quadratic_models_NPQ/timepoint_in_days/days_postATI/quadratic"))) {dir.create(paste0(plot_dir,"/lmer_quadratic_models_NPQ/timepoint_in_days/days_postATI/quadratic"), recursive=T)}  
+if (!dir.exists(paste0(table_dir,"/lmer_quadratic_models_NPQ/timepoint_in_days/days_postATI"))) {dir.create(paste0(table_dir,"/lmer_quadratic_models_NPQ/timepoint_in_days/days_postATI"), recursive=T)}  
+
 #uploading the nulisa seq dataset
 nulisa <- read_excel(paste0(data_dir,"/NULISA.xlsx"), sheet="NPQ Counts")
 head(nulisa)

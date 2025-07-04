@@ -206,12 +206,12 @@ t_points <- c("preATI", "ATI1", "ATI2",  "ATI3","ATI4", "preR", "postR1", "postR
     nulisa_preATI_postR3 <- nulisa_target_all_pid %>% dplyr::filter(timepoint %in%t_points)  %>% arrange(PID)
     nulisa_preATI_postR3_all_target <-   nulisa_target_all_proteins %>% dplyr::filter(timepoint %in%t_points)  %>% arrange(PID) #transform timepoint in quantitative
     
-    nulisa_preATI_postR3_qt <- 
-    nulisa_preATI_postR3 %>% mutate(timepoint = as.factor(timepoint),
-                                  timepoint = relevel(timepoint, ref = "preATI") ,
-                                  timepoint = as.numeric(timepoint),
-                                  timepoint = timepoint - 1
-                                  )
+     nulisa_preATI_postR3_qt <- 
+    nulisa_preATI_postR3 %>% mutate(timepoint =  factor(timepoint, levels=c("preATI", "ATI1"  , "ATI2"  , "ATI3"   ,"ATI4"  , "preR","postR1" ,"postR2" ,"postR3"  )) ,
+                                    timepoint = as.numeric(timepoint),
+                                    timepoint = timepoint - 1
+                                    )
+
 
 ######################################################################################################
 #all samples
@@ -411,11 +411,11 @@ if(anova_summary_df$anova_quadratic_p <=0.05){
   
      #no2523
     nulisa_preATI_postR3_qt_no2523 <- 
-    nulisa_preATI_postR3 %>% mutate(timepoint = as.factor(timepoint),
-                                  timepoint = relevel(timepoint, ref = "preATI") ,
-                                  timepoint = as.numeric(timepoint),
-                                  timepoint = timepoint - 1
-                                  ) %>% dplyr::filter(PID != "2523")
+
+    nulisa_preATI_postR3 %>% mutate(timepoint =  factor(timepoint, levels=c("preATI", "ATI1"  , "ATI2"  , "ATI3"   ,"ATI4"  , "preR","postR1" ,"postR2" ,"postR3"  )) ,
+                                    timepoint = as.numeric(timepoint),
+                                    timepoint = timepoint - 1
+                                    ) %>% dplyr::filter(PID != "2523")
 
     min_model_timepoint_no2523 <- lmer(data=nulisa_preATI_postR3_qt_no2523, NPQ ~ (1|PID) + 
                                                                         timepoint)

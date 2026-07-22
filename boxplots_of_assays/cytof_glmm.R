@@ -351,11 +351,11 @@ suppressWarnings(suppressMessages( library("ggplot2", quietly=T, warn.conflicts=
 suppressWarnings(suppressMessages( library("survey",  quietly=T, warn.conflicts=F, verbose=F) ))
 
 # Constants
-in_file = "/c4/home/ggruenh/re/julia/amfar/cytof_lm/data/20260509_Data_for_GG.csv"
-# out_path = "/c4/home/ggruenh/re/julia/amfar/cytof_lm/results/frequency/"
-out_path = "/c4/home/ggruenh/re/julia/amfar/cytof_lm/results/counts/"
+in_file = "/c4/home/ggruenh/re/julia/amfar/cytof_lm/data/20260711_Data_for_GG.csv"
+out_path = "/c4/home/ggruenh/re/julia/amfar/cytof_lm/results/frequency/"
+# out_path = "/c4/home/ggruenh/re/julia/amfar/cytof_lm/results/counts/"
 n_cores = 5
-use_counts = TRUE
+use_counts = FALSE
 dirs_to_check = c(out_path, paste0(out_path, "/plots_p"), paste0(out_path, "/plots_bh"))
 for (dir_i in dirs_to_check) {
   if (!dir.exists(dir_i)) { dir.create(dir_i, recursive=TRUE) }
@@ -377,7 +377,7 @@ long_df$pop_cat[which(long_df$pop %in% c("nnCD8", "nnCD4", "nnB", "cDC1", "cDC2"
 long_df = long_df[, c("sample", "PID", "PID_New", "timepoint", "COUNT_P1", "COUNT_P2", "pop_cat", "pop", "pct")]
 
 # Select narrow populations (ie a small subset of populations to focus on so p adjustment is less severe)
-narrow_adpt_pops = c("CD8", "CD4", "B", "nnCD8", "nnCD4", "nnB", "nnCD8_Ki67", "nnCD8_CD38HLADR", "nnCD8_CD71", "nnCD4_CD71", "CD27negIgDneg_CD86", "CD27negIgDneg_CD11c", "CD27negIgDneg_BDCA1", "CD27negIgDneg_CD71", "CD27negIgDneg_CD21", "IgDnegIgMneg_CD86", "IgDnegIgMneg_CD11c", "IgDnegIgMneg_BDCA1", "IgDnegIgMneg_CD71", "IgDnegIgMneg_CD21", "IgDnegIgMpos_CD86", "IgDnegIgMpos_CD11c", "IgDnegIgMpos_BDCA1", "IgDnegIgMpos_CD71", "IgDnegIgMpos_CD21", "IgDposIgMpos_CD86", "IgDposIgMpos_CD11c", "IgDposIgMpos_BDCA1", "IgDposIgMpos_CD71", "IgDposIgMpos_CD21", "naiveBcells_CD86", "naiveBcells_CD11c", "naiveBcells_BDCA1", "naiveBcells_CD71", "naiveBcells_CD21", "transitionalBcells_CD86", "transitionalBcells_CD11c", "transitionalBcells_BDCA1", "transitionalBcells_CD71", "transitionalBcells_CD21", "ABC_CD86", "ABC_CD11c", "ABC_BDCA1", "ABC_CD21", "ASC_CD86", "ASC_CD11c", "ASC_BDCA1", "ASC_CD21", "plasmablast_CD86", "plasmablast_CD11c", "plasmablast_BDCA1", "plasmablast_CD71", "plasmablast_CD21")
+narrow_adpt_pops = c("CD8", "CD4", "B", "nnCD8", "nnCD4", "nnB", "nnCD8_Ki67", "nnCD8_CD38HLADR", "nnCD8_CD71", "nnCD4_CD71", "CD27negIgDneg_CD86", "CD27negIgDneg_CD11c", "CD27negIgDneg_BDCA1", "CD27negIgDneg_CD71", "CD27negIgDneg_CD21", "IgDnegIgMneg_CD86", "IgDnegIgMneg_CD11c", "IgDnegIgMneg_BDCA1", "IgDnegIgMneg_CD71", "IgDnegIgMneg_CD21", "IgDnegIgMpos_CD86", "IgDnegIgMpos_CD11c", "IgDnegIgMpos_BDCA1", "IgDnegIgMpos_CD71", "IgDnegIgMpos_CD21", "IgDposIgMpos_CD86", "IgDposIgMpos_CD11c", "IgDposIgMpos_BDCA1", "IgDposIgMpos_CD71", "IgDposIgMpos_CD21", "naiveBcells_CD86", "naiveBcells_CD11c", "naiveBcells_BDCA1", "naiveBcells_CD71", "naiveBcells_CD21", "transitionalBcells_CD86", "transitionalBcells_CD11c", "transitionalBcells_BDCA1", "transitionalBcells_CD71", "transitionalBcells_CD21", "ABC_CD86", "ABC_CD11c", "ABC_BDCA1", "ABC_CD21", "ASC_CD86", "ASC_CD11c", "ASC_BDCA1", "ASC_CD21", "plasmablast_CD86", "plasmablast_CD11c", "plasmablast_BDCA1", "plasmablast_CD71", "plasmablast_CD21", "CD27negIgDneg_Ki67", "naiveBcells_Ki67", "ABC_Ki67", "ASC_Ki67", "IgDnegIgMneg_Ki67", "IgDnegIgMpos_Ki67", "IgDposIgMpos_Ki67", "plasmablast_Ki67", "transitionalBcells_Ki67")
 narrow_innt_pops = c("pDCs", "cDCs", "CD14posCD16negmono", "CD14posCD16posmono", "CD14negCD16posmono", "CD56hiNK", "CD56midNK", "cDC1", "cDC2", "CD56hiNK_CD69", "CD56hiNK_CD25", "CD56hiNK_Perforin", "CD56hiNK_PD1", "CD56hiNK_GzB", "CD56hiNK_Ki67", "CD56midNK_Perforin", "CD56midNK_CD25", "CD56midNK_CD69", "CD56midNK_PD1", "CD56midNK_GzB", "CD56midNK_Ki67", "pDCs_CD71", "pDCs_CD40", "pDCs_CD86", "pDCs_Ki67", "cDC2_CD40", "cDC2_CD71", "cDC2_CD86", "cDC2_Ki67", "cDC1_CD40", "cDC1_CD71", "cDC1_CD86", "cDC1_Ki67", "CD14posCD16negmono_CD40", "CD14posCD16negmono_CD71", "CD14posCD16negmono_CD86", "CD14posCD16negmono_Ki67", "CD14posCD16posmono_CD40", "CD14posCD16posmono_CD71", "CD14posCD16posmono_CD86", "CD14posCD16posmono_Ki67")
 
 # Check that narrow populations are in the data
@@ -473,4 +473,4 @@ uploadFile = function(source_path, dest_path, regex=NULL) {
   }
   system(paste0("bash -c '", rclonev, " ", source_path, " ", dest_path, "'"))
 }
-uploadFile("/c4/home/ggruenh/re/julia/amfar/cytof_lm/results/", "box:1.Rutishauser_Lab/_Rutishauser_Lab_Projects/HIV/HIV_amfAR_trial/Analysis/JW_bNAb\\ Paper\\ Analyses/Paper_Figures/Data\\ for\\ GG/cytof/v6_05122026/")
+uploadFile("/c4/home/ggruenh/re/julia/amfar/cytof_lm/results/", "box:1.Rutishauser_Lab/_Rutishauser_Lab_Projects/HIV/HIV_amfAR_trial/Analysis/JW_bNAb\\ Paper\\ Analyses/Paper_Figures/Data\\ for\\ GG/cytof/v7_07152026/")

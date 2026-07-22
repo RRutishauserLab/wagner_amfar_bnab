@@ -33,13 +33,17 @@ checkForRequiredLibraries = function(required_libs) {
 #' @param raw_df Raw data frame
 #' 
 #' @return Data frame with model results
-modelData = function(pop, raw_df) {
+modelData = function(pop, raw_df, full_formula_str, update_formula_str) {
   # Select data for population
   raw_df = raw_df[which(raw_df$Target == pop),]
   
+  #
+  full_formula = as.formula(full_formula_str)
+  update_formula = as.formula(update_formula_str)
+
   # Fit models
-  full_model    = suppressMessages(suppressWarnings( lme4::glmer(NPQ ~ timepoint + (1|PID_New), data=raw_df) ))
-  reduced_model = suppressMessages(suppressWarnings( update(full_model, .~. - timepoint) ))
+  full_model    = suppressMessages(suppressWarnings( lme4::glmer(full_formula, data=raw_df) ))
+  reduced_model = suppressMessages(suppressWarnings( update(full_model, update_formula) ))
   kr_compare = pbkrtest::KRmodcomp(full_model, reduced_model)
   
   # Extract results
@@ -57,7 +61,7 @@ modelData = function(pop, raw_df) {
   return(res_df)
 }
 
-modelDataAtTimepoints = function(timepoints, long_df, n_cores) {
+modelDataAtTimepoints = function(timepoints, long_df, n_cores, full_formula_str="NPQ ~ timepoint + (1|PID_New)", update_formula_str=" .~. - timepoint") {
   # Make a nice message that lists the timepoints being modeled
   is_all_timpoints = all(levels(long_df$timepoint) %in% timepoints)
   timepoints_str = paste0("between ", paste0(timepoints, collapse=" and "))
@@ -69,7 +73,7 @@ modelDataAtTimepoints = function(timepoints, long_df, n_cores) {
   df$timepoint = droplevels(df$timepoint)
 
   # Model the data
-  res_df_list = bettermc::mclapply(unique(df$Target), modelData, raw_df=df, mc.stdout='ignore', mc.messages='ignore', mc.allow.fatal=TRUE, mc.allow.error=TRUE, mc.fail.early=TRUE, mc.dump.frames="no", mc.progress=TRUE)
+  res_df_list = bettermc::mclapply(unique(df$Target), modelData, raw_df=df, full_formula_str=full_formula_str, update_formula_str=update_formula_str, mc.stdout='ignore', mc.messages='ignore', mc.allow.fatal=TRUE, mc.allow.error=TRUE, mc.fail.early=TRUE, mc.dump.frames="no", mc.progress=TRUE)
   res_df = as.data.frame(data.table::rbindlist(res_df_list))
 
   # Rename columns to indicate timepoints
@@ -136,7 +140,7 @@ categorizeAndAdjust = function(res_df, narrow_adpt_pops=narrow_adpt_pops, narrow
   return(res_df)
 }
 
-# ## Plotting ===================================================================
+## Plotting ===================================================================
 
 # #' Custom ggplot2 theme for publication-quality figures
 # theme_classic_pub = function(title_font_size=6, title_font_face="plain", axis_font_size=6, axis_font_face="plain", axis_line_width=0.5, legend_shape_text_space=0.25) {
@@ -212,8 +216,6 @@ categorizeAndAdjust = function(res_df, narrow_adpt_pops=narrow_adpt_pops, narrow
 ## Setup ======================================================================
 
 # Set file paths
-# in_dir = "/Users/jwagner1/Desktop/"
-# out_dir = "/Users/jwagner1/Desktop/"
 in_dir = "/c4/home/ggruenh/re/julia/amfar/proteomics/data/"
 out_dir = "/c4/home/ggruenh/re/julia/amfar/proteomics/results/"
 file_ext = "pdf"
@@ -243,12 +245,14 @@ nulisa$PID_timepoint = paste0(nulisa$PID, "_", nulisa$timepoint)
 nulisa$PID_New = plyr::revalue(nulisa$PID, c("1292"="35933", "1408"="42894", "2251"="10227", "2523"="60610", "2594"="47019", "2908"="71190", "8012"="72210", "8092"="30988", "8106"="31092"))
 nulisa$PID_New = factor(nulisa$PID_New, levels=c("31092", "35933", "42894", "10227", "30988", "47019", "71190", "72210", "60610"))
 nulisa$C = ! nulisa$PID_New %in% c("31092", "35933", "42894")
+nulisa$C = plyr::revalue(as.character(nulisa$C), c("TRUE"="C", "FALSE"="NC"))
+nulisa$C = factor(nulisa$C, levels=c("C", "NC"))
 
 # Subset data
 timepoints_to_use = c("preATI", "ATI1", "ATI2", "preR")
 # proteins_to_use = c("LAMP3","IL18R1", "CCL21", "ICOSLG", "TNFRSF13C", "TNFRSF4")
 nulisa = nulisa[which(nulisa$timepoint %in% timepoints_to_use),]                # subset to timepoints of interest
-nulisa = nulisa[which(nulisa$Target %in% proteins_to_use),]                     # subset to proteins of interest
+# nulisa = nulisa[which(nulisa$Target %in% proteins_to_use),]                     # subset to proteins of interest
 nulisa = nulisa[which(nulisa$PID != "2887"),]                                   # remove PID 2887
 nulisa = nulisa[which(nulisa$PID_timepoint != "8012_ATI2"),]                    # remove PID 8012 at ATI2
 nulisa = nulisa[which(nulisa$PID_timepoint != "2523_preR"),]                    # remove PID 2523 at preR
@@ -257,10 +261,10 @@ nulisa = nulisa[which( !(nulisa$timepoint == "ATI1" & nulisa$PID != "8012") ),] 
 # Recode timepoints
 nulisa$timepoint[which(nulisa$timepoint %in% c("ATI1", "ATI2"))] = "bNAb"
 nulisa$timepoint = factor(nulisa$timepoint, levels=c("preATI", "bNAb", "preR"))
-long_df = nulisa[,c("PID", "PID_New", "PID_timepoint", "timepoint", "Target", "NPQ")]
+long_df = nulisa[,c("PID", "PID_New", "C", "PID_timepoint", "timepoint", "Target", "NPQ")]
 timepoints_to_use = c("preATI", "bNAb", "preR")
 
-## Stats ======================================================================
+## Stats time =================================================================
 
 # Model data across all timepoints
 res_df = modelDataAtTimepoints(timepoints=timepoints_to_use, long_df=long_df, n_cores=n_cores)
@@ -290,7 +294,7 @@ res_df$median_NPQ_bnab   = sapply(res_df$pop, function(pop) { median(long_df$NPQ
 res_df$median_NPQ_prer   = sapply(res_df$pop, function(pop) { median(long_df$NPQ[which(long_df$Target == pop & long_df$timepoint == "preR")],   na.rm=T) })
 res_df = res_df[, c("pop", "mean_NPQ_preati", "mean_NPQ_bnab", "mean_NPQ_prer", "median_NPQ_preati", "median_NPQ_bnab", "median_NPQ_prer", setdiff(colnames(res_df), c("pop", "mean_NPQ_preati", "mean_NPQ_bnab", "mean_NPQ_prer", "median_NPQ_preati", "median_NPQ_bnab", "median_NPQ_prer")))]
 
-## Save csv ===================================================================
+## Save time csv ==============================================================
 
 # # Remove bh from the results because really the adjustment should've been done on all proteins
 # res_df = res_df[,!grepl("bh_", colnames(res_df))]
@@ -304,11 +308,61 @@ res_any_p_sig  = res_df[which(res_df$p_all  < 0.05 | res_df$p_preati_bnab  < 0.0
 res_any_bh_sig = res_df[which(res_df$bh_all < 0.05 | res_df$bh_preati_bnab < 0.05 | res_df$bh_bnab_prer < 0.05 | res_df$bh_preati_prer < 0.05), bh_cols_to_keep]
 
 # Write results
-write.csv(res_df, file=paste0(out_dir, "stats_detailed.csv"), row.names=FALSE)
-write.csv(res_any_p_sig, file=paste0(out_dir, "stats_any_p_sig.csv"), row.names=FALSE)
-write.csv(res_any_bh_sig, file=paste0(out_dir, "stats_any_bh_sig.csv"), row.names=FALSE)
+write.csv(res_df, file=paste0(out_dir, "stats_detailed_time.csv"), row.names=FALSE)
+write.csv(res_any_p_sig, file=paste0(out_dir, "stats_any_p_sig_time.csv"), row.names=FALSE)
+write.csv(res_any_bh_sig, file=paste0(out_dir, "stats_any_bh_sig_time.csv"), row.names=FALSE)
 
-# ## Plotting ===================================================================
+## Stats interaction ==========================================================
+
+# Model data across all timepoints
+res_df = modelDataAtTimepoints(timepoints=timepoints_to_use, long_df=long_df, n_cores=n_cores, full_formula_str="NPQ ~ timepoint*C + (1|PID_New)", update_formula_str=" .~. - timepoint:C")
+res_df = categorizeAndAdjust(res_df, base_col_name="all")
+
+# Model data b/w BL and bNAb
+res_df_preati_bnab = modelDataAtTimepoints(timepoints=c("preATI", "bNAb"), long_df=long_df, n_cores=n_cores, full_formula_str="NPQ ~ timepoint*C + (1|PID_New)", update_formula_str=" .~. - timepoint:C")
+res_df_preati_bnab = categorizeAndAdjust(res_df_preati_bnab, base_col_name="preati_bnab")
+res_df[,colnames(res_df_preati_bnab)[-1]] = res_df_preati_bnab[match(res_df$pop, res_df_preati_bnab$pop), colnames(res_df_preati_bnab)[-1]]
+
+# Model data b/w bNAb and PreR
+res_df_bnab_prer = modelDataAtTimepoints(timepoints=c("bNAb", "preR"), long_df=long_df, n_cores=n_cores, full_formula_str="NPQ ~ timepoint*C + (1|PID_New)", update_formula_str=" .~. - timepoint:C")
+res_df_bnab_prer = categorizeAndAdjust(res_df_bnab_prer, base_col_name="bnab_prer")
+res_df[,colnames(res_df_bnab_prer)[-1]] = res_df_bnab_prer[match(res_df$pop, res_df_bnab_prer$pop), colnames(res_df_bnab_prer)[-1]]
+
+# Model data b/w PreATI and PreR
+res_df_preati_prer = modelDataAtTimepoints(timepoints=c("preATI", "preR"), long_df=long_df, n_cores=n_cores, full_formula_str="NPQ ~ timepoint*C + (1|PID_New)", update_formula_str=" .~. - timepoint:C")
+res_df_preati_prer = categorizeAndAdjust(res_df_preati_prer, base_col_name="preati_prer")
+res_df[,colnames(res_df_preati_prer)[-1]] = res_df_preati_prer[match(res_df$pop, res_df_preati_prer$pop), colnames(res_df_preati_prer)[-1]]
+
+# Calculate means
+res_df$mean_C_NPQ_preati   = sapply(res_df$pop, function(pop) { mean(long_df$NPQ[which(long_df$Target == pop   & long_df$timepoint == "preATI" & long_df$C == "C")], na.rm=T) })
+res_df$mean_C_NPQ_bnab     = sapply(res_df$pop, function(pop) { mean(long_df$NPQ[which(long_df$Target == pop   & long_df$timepoint == "bNAb"   & long_df$C == "C")],   na.rm=T) })
+res_df$mean_C_NPQ_prer     = sapply(res_df$pop, function(pop) { mean(long_df$NPQ[which(long_df$Target == pop   & long_df$timepoint == "preR"   & long_df$C == "C")],   na.rm=T) })
+res_df$median_C_NPQ_preati = sapply(res_df$pop, function(pop) { median(long_df$NPQ[which(long_df$Target == pop & long_df$timepoint == "preATI" & long_df$C == "C")], na.rm=T) })
+res_df$median_C_NPQ_bnab   = sapply(res_df$pop, function(pop) { median(long_df$NPQ[which(long_df$Target == pop & long_df$timepoint == "bNAb"   & long_df$C == "C")],   na.rm=T) })
+res_df$median_C_NPQ_prer   = sapply(res_df$pop, function(pop) { median(long_df$NPQ[which(long_df$Target == pop & long_df$timepoint == "preR"   & long_df$C == "C")],   na.rm=T) })
+res_df$mean_NC_NPQ_preati   = sapply(res_df$pop, function(pop) { mean(long_df$NPQ[which(long_df$Target == pop   & long_df$timepoint == "preATI" & long_df$C == "NC")], na.rm=T) })
+res_df$mean_NC_NPQ_bnab     = sapply(res_df$pop, function(pop) { mean(long_df$NPQ[which(long_df$Target == pop   & long_df$timepoint == "bNAb"   & long_df$C == "NC")],   na.rm=T) })
+res_df$mean_NC_NPQ_prer     = sapply(res_df$pop, function(pop) { mean(long_df$NPQ[which(long_df$Target == pop   & long_df$timepoint == "preR"   & long_df$C == "NC")],   na.rm=T) })
+res_df$median_NC_NPQ_preati = sapply(res_df$pop, function(pop) { median(long_df$NPQ[which(long_df$Target == pop & long_df$timepoint == "preATI" & long_df$C == "NC")], na.rm=T) })
+res_df$median_NC_NPQ_bnab   = sapply(res_df$pop, function(pop) { median(long_df$NPQ[which(long_df$Target == pop & long_df$timepoint == "bNAb"   & long_df$C == "NC")],   na.rm=T) })
+res_df$median_NC_NPQ_prer   = sapply(res_df$pop, function(pop) { median(long_df$NPQ[which(long_df$Target == pop & long_df$timepoint == "preR"   & long_df$C == "NC")],   na.rm=T) })
+mean_and_median_cols = c("pop", "mean_C_NPQ_preati", "mean_NC_NPQ_preati", "mean_C_NPQ_bnab", "mean_NC_NPQ_bnab", "mean_C_NPQ_prer", "mean_NC_NPQ_prer", "median_C_NPQ_preati", "median_NC_NPQ_preati", "median_C_NPQ_bnab", "median_NC_NPQ_bnab", "median_C_NPQ_prer", "median_NC_NPQ_prer")
+res_df = res_df[, c(mean_and_median_cols, setdiff(colnames(res_df), mean_and_median_cols))]
+
+## Save interaction csv =======================================================
+
+# Make separate dataframes for results with any p or bh significance
+p_cols_to_keep = c("pop", "p_all", "p_preati_bnab", "p_bnab_prer", "p_preati_prer")
+bh_cols_to_keep = c("pop", "bh_all", "bh_preati_bnab", "bh_bnab_prer", "bh_preati_prer")
+res_any_p_sig  = res_df[which(res_df$p_all  < 0.05 | res_df$p_preati_bnab  < 0.05 | res_df$p_bnab_prer  < 0.05 | res_df$p_preati_prer  < 0.05), p_cols_to_keep]
+res_any_bh_sig = res_df[which(res_df$bh_all < 0.05 | res_df$bh_preati_bnab < 0.05 | res_df$bh_bnab_prer < 0.05 | res_df$bh_preati_prer < 0.05), bh_cols_to_keep]
+
+# Write results
+write.csv(res_df, file=paste0(out_dir, "stats_detailed_time-C-interact.csv"), row.names=FALSE)
+write.csv(res_any_p_sig, file=paste0(out_dir, "stats_any_p_sig_time-C-interact.csv"), row.names=FALSE)
+write.csv(res_any_bh_sig, file=paste0(out_dir, "stats_any_bh_sig_time-C-interact.csv"), row.names=FALSE)
+
+## Plotting ===================================================================
 
 # # Turn showtext on for Helvetica font in png's
 # my_dpi = 900

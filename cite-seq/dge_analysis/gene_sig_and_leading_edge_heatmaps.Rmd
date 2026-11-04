@@ -1,0 +1,669 @@
+---
+title: "Gene signature and leading edge heatmaps"
+author: "Ravi K. Patel"
+date: "2026-05-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load packages}
+library(tidyverse)
+library(edgeR)
+
+source("amfar_helper_functions.R")
+
+```
+
+
+## C vs NC plots
+```{r load data C vs NC}
+
+gsea_files = c(
+list.files("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/dge_analysis/CvsNC_preATI/", pattern="v3_DESeq2woBatch_", full.name=T) %>% grep("gsea.csv", ., value=T),
+list.files("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/dge_analysis/CvsNC_vaccinal/", pattern="v3_DESeq2woBatch_", full.name=T) %>% grep("gsea.csv", ., value=T),
+list.files("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/dge_analysis/CvsNC_preR/", pattern="v3_DESeq2woBatch_", full.name=T) %>% grep("gsea.csv", ., value=T),
+list.files("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/dge_analysis/CvsNC_postR1/", pattern="v3_DESeq2woBatch_", full.name=T) %>% grep("gsea.csv", ., value=T),
+list.files("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/dge_analysis/CvsNC_postR2/", pattern="v3_DESeq2woBatch_", full.name=T) %>% grep("gsea.csv", ., value=T)
+)
+
+all_gsea_res = data.frame()
+all_dge_logfc = list()
+for(f in gsea_files) {
+  if(file.info(f)$size == 3) {
+    print(paste0(f, " is empty. Skipping"))
+    next
+  }
+  ct = gsub("v3_DESeq2woBatch_|_gsea.csv", "", basename(f))
+  comp = gsub("CvsNC_","",str_extract(f, "CvsNC_[^/]+"))
+  d = read.csv(f) %>% select(c("pathway","padj","NES","leadingEdge","db"))
+  dup_path = d$pathway[duplicated(d$pathway)]
+  d = d[ ! (d$pathway %in% dup_path & d$db == "customDB"), ]
+  d$ctype = ct
+  d$comp = comp
+  all_gsea_res = rbind(all_gsea_res, d)
+  all_dge_logfc[[paste0(comp,"#",ct)]] = read.csv(gsub("_gsea","",f), row.names = 1) %>% select(logFC)
+}
+
+
+all_gsea_res_CvsNA = all_gsea_res
+all_dge_logfc_CvsNA = all_dge_logfc
+
+# Modify annotations in list names
+names(all_dge_logfc_CvsNA) = paste0(
+  str_extract(names(all_dge_logfc_CvsNA), "^[^#]+"),
+  "#",
+  modify_annot(str_extract(names(all_dge_logfc_CvsNA), "[^#]+$"))
+)
+
+# Removing pathways of customDB1 that are also present in other databases.
+customDB1_paths = unique(all_gsea_res_CvsNA$pathway[all_gsea_res_CvsNA$db == "customDB1"])
+customDB1_redundant_paths = intersect(customDB1_paths, all_gsea_res_CvsNA$pathway[all_gsea_res_CvsNA$db != "customDB1"])
+all_gsea_res_CvsNA = all_gsea_res_CvsNA[ !(all_gsea_res_CvsNA$pathway %in% customDB1_redundant_paths & all_gsea_res_CvsNA$db == "customDB1"), ]
+
+
+
+meta_tmp = read.csv("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/sample_mapping/sample_mapping_corrected.csv")
+p_meta = read.csv("/krummellab/data1/DSCoLab/AMFAR/analysis/sample_metadata/participant_metadata_v2.csv")
+p_meta[ p_meta$outcome == "NR", "outcome" ] = "C"
+meta = data.frame(
+    pid_tp=paste0(meta_tmp$participant_id, "_", meta_tmp$timepoint), 
+    pid=meta_tmp$participant_id, 
+    tp=meta_tmp$timepoint, 
+    orig.ident=meta_tmp$orig.ident) %>% 
+  na.omit() %>% 
+  filter(!(orig.ident == "AMFAR-POOL-RR2-SCG1" & pid == "60610") & 
+         !(pid == "35933" & tp == "postR1") & 
+         !(pid == "60610" & tp == "UD2") & 
+         !(pid == "60610" & tp == "UD1") 
+    )
+meta = inner_join(meta, p_meta[,c("pid","outcome","new_pid")], by="pid")
+
+pb_list = readRDS("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/4.subclustering_adtUpDown_rnaUp_cutoffs_v3/pb_exp_all_genes_fine_annot.rds")
+
+samples_to_exclude = c("35933_postR1", "60610_postR1", "60610_preR")
+pb_list = lapply(pb_list, function(x) x[,setdiff(colnames(x), samples_to_exclude)])
+
+#pb_list_broad = readRDS("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/4.subclustering_adtUpDown_rnaUp_cutoffs_v3/pb_exp_all_genes_broad_annot.rds")
+#pb_list_broad = pb_list_broad[ names(pb_list_broad) != "HSPC"]
+
+#pb_list = append(pb_list, pb_list_broad)
+
+#vl = read.csv("/krummellab/data1/DSCoLab/AMFAR/analysis/sample_metadata/citeseq_vl.csv")
+#vl$VL = log10(vl$VL)
+
+```
+
+
+```{r generate heatmaps - C vs NC}
+
+# Can include only one pathway at a time
+paths = c("HALLMARK_TNFA_SIGNALING_VIA_NFKB")
+paths_short = c("TNF-a signaling NFKB") %>%
+    setNames(paths)
+
+my_gsea_res = all_gsea_res_CvsNA[ all_gsea_res_CvsNA$pathway %in% paths & !is.na(all_gsea_res_CvsNA$padj) & all_gsea_res_CvsNA$padj < 0.1, ]
+
+#final_ct_list = grep("Mo|DC|NK_|CD4_|CD8_|B_|Plasmablasts",all_ct, value=T) 
+tnf_ctypes = c("cMo","cDC2","pDC","B_IgM+IgD+","B_mem_not_switched","CD4_naive","CD4_memory_NOS","CD8_naive","NK_adaptive_1","NK_adaptive_2")
+final_ct_list = tnf_ctypes
+comps = c("preATI","preR")
+
+plotlist = list()
+for(ct in unique(my_gsea_res$ctype)) {
+  ct = gsub("_deseq","",ct)
+  if(! modify_annot(ct) %in% final_ct_list)
+    next
+  print(ct)
+  plotlist[[modify_annot(ct)]] = list()
+  cd = pb_list[[ct]]
+  for(cm in comps) {
+    if(cm == "postR2")
+      next
+    # Subset to samples of interest
+    cd_tmp = cd %>% select(contains(cm)) %>% select(contains( as.character(p_meta$pid[ p_meta$outcome %in% c("C","NC")]) ))    # Keep features that are expressed with CPM > 1 in more than 50% of samples in one or both outcome groups.
+    meta_tmp = meta[ match(colnames(cd_tmp), meta$pid_tp), ]
+    feats = names(which(apply(cpm(cd_tmp) > 1, 1, function(x) { any(tapply(x, meta_tmp$outcome, mean) > 0.5) } )))
+    print(length(feats))
+    cd_tmp = cd_tmp[feats,]
+    cd_tmp = as.data.frame(cpm(cd_tmp))
+    # Scale the data
+    cd_tmp = apply(cd_tmp, 1, scale) %>% t() %>% as.data.frame() %>% setNames(colnames(cd_tmp))
+    gsea_tmp = my_gsea_res[ my_gsea_res$ctype == ct & my_gsea_res$comp == cm, ]
+    if(nrow(gsea_tmp) == 0)
+      next
+    res = data.frame()
+    for(p in gsea_tmp$pathway) {
+      lgenes = unlist(str_split(gsea_tmp$leadingEdge[gsea_tmp$pathway == p], ", "))
+      if(sum(! lgenes %in% rownames(cd_tmp)) > 0) {
+        warning(paste0(ct, "_", cm, ":", p, ":missing genes ", sum(! lgenes %in% rownames(cd_tmp))))
+        warning( paste0( setdiff(lgenes, rownames(cd_tmp)), collapse=", "))
+      }
+      lgenes = lgenes[ lgenes %in% rownames(cd_tmp) ]
+      score = colMeans(cd_tmp[lgenes,])
+      res = rbind(res, data.frame(
+        pid=str_extract(names(score), "^\\d+"), 
+        tp=str_extract(names(score), "[^_]+$"),
+        score = score,
+        p = p
+      ) %>% mutate(outcome = p_meta$outcome[ match(pid, p_meta$pid) ]) )
+    }
+    res = pivot_wider(res, names_from=p, values_from=score)
+    res = as.data.frame(res)
+    res$tp = rename_tp(res$tp)
+    cm2 = rename_tp(cm)
+    rownames(res) = paste0(res$pid, "_", res$tp)
+    res$tp = NULL
+
+    colnames(res)[3:ncol(res)] = paths_short[colnames(res)[3:ncol(res)]]
+
+    stars = c()
+    for(i in 3:ncol(res)){ 
+        p=wilcox.test( res[res$outcome == "C",i], res[res$outcome == "NC",i])$p.value
+        s = ""
+        if(p < 0.05)
+          s = "*"
+        stars = c(stars, s)
+    }
+    colnames(res)[3:ncol(res)] = paste0(colnames(res)[3:ncol(res)], stars)
+
+    cluster_cols = ncol(res) > 3
+    
+    #ha = ComplexHeatmap::rowAnnotation(
+    #  vl = vl$VL[ match( rownames(res), rename_tp(vl$pid_tp) )],
+    #  col = list(
+    #    vl = circlize::colorRamp2(range(vl$VL), c("white","orange"))
+    #  )
+    #)
+    
+    #plotlist[[paste0(ct, "#", cm)]] = 
+    plotlist[[modify_annot(ct)]][[cm]] = ComplexHeatmap::Heatmap(
+      res[,3:ncol(res), drop=F], 
+      cluster_columns = cluster_cols, 
+      row_split = factor(res$outcome, levels=c("C","NC")), 
+      cluster_row_slices = FALSE, 
+      #left_annotation = ha, 
+      width = unit(0.4*(ncol(res)-2), "in" ), 
+      height = unit(0.4*(nrow(res)-2), "in" ) )
+  }
+}
+
+plotlist_CvsNC = plotlist
+
+```
+
+```{r reorganize heatmaps for select timepoint and celltype - C vs NC}
+
+
+#### Fig S8
+
+
+preati_ctypes = c("cMo","cDC2","pDC")
+preati_ctypes = c("cMo","cDC2")
+prer_ctypes = c("B_IgM+IgD+","B_mem_not_switched","CD4_naive","CD4_memory_NOS","CD8_naive","NK_adaptive_1","NK_adaptive_2")
+
+tp = 'preATI'
+ctypes = preati_ctypes
+
+tp = 'preR'
+ctypes = prer_ctypes
+
+df = data.frame()
+for(ctype in ctypes) {
+  df = 
+    rbind(df,
+          plotlist_CvsNC[[ctype]][[tp]]@matrix %>% 
+          data.frame() %>% 
+          setNames("score") %>% 
+          mutate(pid_tp = rownames(.), pid=get_pid_from_pidtp(pid_tp), new_pid = update_pid(pid), ct = ctype)
+    )
+}
+
+#df$vl = vl$VL[ match( df$pid_tp, rename_tp(vl$pid_tp) )]
+df$outcome = p_meta$outcome[ match(df$pid, p_meta$pid) ]
+
+df = pivot_wider(df, names_from = 'ct', values_from = 'score') %>% column_to_rownames('new_pid')
+
+#ha = ComplexHeatmap::rowAnnotation(
+#  vl = df$vl,
+#  col = list(
+#    vl = circlize::colorRamp2(range(vl$VL), c("white","orange"))
+#  )
+#)
+
+#data_clm = 5:ncol(df)
+data_clm = 4:ncol(df)
+
+p = ComplexHeatmap::Heatmap(
+    df[,data_clm, drop=F], 
+    cluster_columns = FALSE, 
+    row_split = factor(df$outcome, levels=c("C","NC")), 
+    cluster_row_slices = FALSE,
+    #left_annotation = ha, 
+    width = unit(0.2*(length(data_clm)), "in" ), 
+    height = unit(0.2*(nrow(df)), "in" ),
+    show_column_dend = FALSE,
+    show_row_dend = FALSE,
+    column_title = paste0(tp,":",paths_short[1])
+    )
+
+pdf(paste0("../../../../10x/dge_analysis/gene_signature_heatmaps_CvsNC_tnfa_",tp,"_v1.pdf"),width=8,height=8)
+print(p)
+dev.off()
+```
+
+
+
+
+```{r leading-edge log2 diff heatmap - C vs NC }
+
+#### Fig 7B
+
+# Selected leading-edge genes to plot
+tnf_CvsNC_preATI = c("TRAF1","TNFAIP3","NFKBIA","NFKB1","IL23A","IL1B","ICOSLG","CCL4","CCL20","RIPK2","IL1A","IFNGR2","CXCL2","CD83","CD80","CCL2","IL15RA","TLR2","REL","TNF","RIGI","RELB","NFKB2","IFIT2","IRF1","IL6ST","CD69","IL6","CXCL3","CXCL10","CXCL1","CSF1","CEBPB","CCL5")
+
+tnf_CvsNC_preR = c("JUN","FOSB","FOS","CD69","IL1B","BCL2A1","FOSL1","CCL4","TNF","IL23A","NFKB1","KDM6B","NFAT5","ICAM1","RELB","CCL5","IL6")
+
+
+tp = 'preATI'
+path = "HALLMARK_TNFA_SIGNALING_VIA_NFKB"
+path_short = "TNF-a signaling NFKB"
+if(tp == 'preATI') {
+  ctypes = preati_ctypes
+  genes = tnf_CvsNC_preATI
+  out_file = paste0("../../../../10x/dge_analysis/leading_edge_log2fc_heatmap_CvsNC_tnfa_",tp,".pdf")
+} else if(tp == 'preR') {
+  ctypes = c("B_mem_not_switched","CD4_naive","CD8_naive")
+  genes = tnf_CvsNC_preR
+  out_file = paste0("../../../../10x/dge_analysis/leading_edge_log2fc_heatmap_CvsNC_tnfa_",tp,".pdf")
+}
+
+my_gsea_res = all_gsea_res_CvsNA[ all_gsea_res_CvsNA$pathway %in% path & !is.na(all_gsea_res_CvsNA$padj) & all_gsea_res_CvsNA$padj < 0.1, ]
+
+
+
+df = data.frame()
+for(ctype in ctypes) {
+  gsea_idx = my_gsea_res$ctype == ctype & my_gsea_res$comp == tp
+  if(sum(gsea_idx) != 1) {
+    stop("Found more than 1 matching gsea results for ", tp, ":", ctype)
+  } 
+  le_genes = intersect(genes, unlist(str_split(my_gsea_res$leadingEdge[gsea_idx], ", ")))
+  tmp_df = all_dge_logfc_CvsNA[[paste0(tp, "#", ctype)]][le_genes,,drop=F] %>% 
+    na.omit() %>% rownames_to_column("gene") %>%
+    mutate(ctype = ctype)
+  df = rbind(df, tmp_df)
+}
+
+df = pivot_wider(df, names_from = gene, values_from = logFC) %>% column_to_rownames("ctype")
+if(ncol(df) != length(genes)) {
+  warning("Missing a few genes in ", tp, "\n", paste0(genes[! genes %in% colnames(df)], collapse = ","), "\n")
+}
+
+col_fun = circlize::colorRamp2(c( min(-1, min(df, na.rm = T)), 0, max( max(df, na.rm = T), 1) ), c("blue", "white", "red"))
+
+p = ComplexHeatmap::Heatmap(df,
+    width = unit(0.25*(ncol(df)-4), "in" ), 
+    height = unit(0.2*(nrow(df)), "in" ),
+    col = col_fun,
+    show_column_dend = FALSE,
+    show_row_dend = FALSE,
+    column_title = paste0(tp, ":", path_short),
+    cluster_columns = FALSE
+    )
+
+pdf(out_file, width=15, height=6)
+print(p)
+dev.off()
+
+
+```
+
+
+## Between timepoint plots
+```{r load data - between TPs}
+
+gsea_files = c(
+  list.files("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/dge_analysis/vaccinal_vs_preATI/", pattern="v2_nestedBatchRandom_", full.name=T) %>% grep("gsea.csv", ., value=T),
+  list.files("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/dge_analysis/preR_vs_preATI/", pattern="v2_nestedBatchRandom_", full.name=T) %>% grep("gsea.csv", ., value=T),
+  list.files("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/dge_analysis/postR1_vs_preATI/", pattern="v2_nestedBatchRandom_", full.name=T) %>% grep("gsea.csv", ., value=T),
+  list.files("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/dge_analysis/postR2_vs_preATI/", pattern="v2_nestedBatchRandom_", full.name=T) %>% grep("gsea.csv", ., value=T)
+)
+
+all_gsea_res = data.frame()
+all_dge_logfc = list()
+for(f in gsea_files) {
+  if(file.info(f)$size == 3) {
+    print(paste0(f, " is empty. Skipping"))
+    next
+  }
+  ct = gsub("v2_nestedBatchRandom_|_gsea.csv", "", basename(f))
+  comp = str_extract(f, "[^/]+_vs_[^/]+")
+  d = read.csv(f) %>% select(c("pathway","padj","NES","leadingEdge","db"))
+  dup_path = d$pathway[duplicated(d$pathway)]
+  d = d[ ! (d$pathway %in% dup_path & d$db == "customDB"), ]
+  d$ctype = ct
+  d$comp = comp
+  all_gsea_res = rbind(all_gsea_res, d)
+  all_dge_logfc[[paste0(comp,"#",ct)]] = read.csv(gsub("_gsea","",f), row.names = 1) %>% select(logFC)
+}
+
+all_gsea_res_bwTP = all_gsea_res
+all_dge_logfc_bwTP = all_dge_logfc
+
+# Modify annotations in list names
+names(all_dge_logfc_bwTP) = paste0(
+  str_extract(names(all_dge_logfc_bwTP), "^[^#]+"),
+  "#",
+  modify_annot(str_extract(names(all_dge_logfc_bwTP), "[^#]+$"))
+)
+
+# Modify timepoint in list names
+names(all_dge_logfc_bwTP) = gsub("_vs_preATI", "",rename_tp(names(all_dge_logfc_bwTP)))
+
+
+
+# Removing pathways of customDB1 that are also present in other databases.
+customDB1_paths = unique(all_gsea_res_bwTP$pathway[all_gsea_res_bwTP$db == "customDB1"])
+customDB1_redundant_paths = intersect(customDB1_paths, all_gsea_res_bwTP$pathway[all_gsea_res_bwTP$db != "customDB1"])
+all_gsea_res_bwTP = all_gsea_res_bwTP[ !(all_gsea_res_bwTP$pathway %in% customDB1_redundant_paths & all_gsea_res_bwTP$db == "customDB1"), ]
+
+
+meta_tmp = read.csv("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/sample_mapping/sample_mapping_corrected.csv")
+p_meta = read.csv("/krummellab/data1/DSCoLab/AMFAR/analysis/sample_metadata/participant_metadata_v2.csv")
+p_meta[ p_meta$outcome == "NR", "outcome" ] = "C"
+
+meta = data.frame(
+    pid_tp=paste0(meta_tmp$participant_id, "_", meta_tmp$timepoint), 
+    pid=meta_tmp$participant_id, 
+    tp=meta_tmp$timepoint, 
+    orig.ident=meta_tmp$orig.ident) %>% 
+  na.omit() %>% 
+  filter(!(orig.ident == "AMFAR-POOL-RR2-SCG1" & pid == "60610") & 
+         !(pid == "35933" & tp == "postR1") & 
+         !(pid == "60610" & tp == "UD2") & 
+         !(pid == "60610" & tp == "UD1") 
+    )
+meta = inner_join(meta, p_meta[,c("pid","outcome","new_pid")], by="pid")
+
+pb_list = readRDS("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/4.subclustering_adtUpDown_rnaUp_cutoffs_v3/pb_exp_all_genes_fine_annot.rds")
+
+samples_to_exclude = c("35933_postR1", "60610_postR1", "60610_preR")
+pb_list = lapply(pb_list, function(x) x[,setdiff(colnames(x), samples_to_exclude)])
+
+#pb_list_broad = readRDS("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/4.subclustering_adtUpDown_rnaUp_cutoffs_v3/pb_exp_all_genes_broad_annot.rds")
+#pb_list_broad = pb_list_broad[ names(pb_list_broad) != "HSPC"]
+
+#pb_list = append(pb_list, pb_list_broad)
+
+#vl = read.csv("/krummellab/data1/DSCoLab/AMFAR/analysis/sample_metadata/citeseq_vl.csv")
+#vl$VL = log10(vl$VL)
+
+
+```
+
+
+```{r generate heatmaps - between TPs}
+
+# Can include only one pathway at a time
+paths = c("HALLMARK_TNFA_SIGNALING_VIA_NFKB","HALLMARK_INTERFERON_ALPHA_RESPONSE")
+paths_short = c("TNF-a signaling NFKB","IFNa response") %>%
+    setNames(paths)
+
+my_gsea_res = all_gsea_res_bwTP[ all_gsea_res_bwTP$pathway %in% paths & !is.na(all_gsea_res_bwTP$padj) & all_gsea_res_bwTP$padj < 0.1, ]
+my_gsea_res$comp = gsub("_vs_preATI","",my_gsea_res$comp)
+
+ifn_bnab_ctypes = c("cDC2")
+ifn_prer_ctypes = c("cMo","cDC2","pDC","ncMo_cd16mid", "ncMo_cd16high")
+tnf_bnab_ctypes = c("cMo","ncMo_cd16mid","cDC2","pDC")
+tnf_prer_ctypes = c("cMo","ncMo_cd16mid", "ncMo_cd16high","cDC2","pDC")
+
+final_ct_list = unique(c(ifn_bnab_ctypes, ifn_prer_ctypes, tnf_bnab_ctypes, tnf_prer_ctypes))
+comps = c("bNAb","preR")
+
+
+plotlist = list()
+for(ct in unique(my_gsea_res$ctype)) {
+  ct = gsub("_deseq","",ct)
+  if(! modify_annot(ct) %in% final_ct_list)
+    next
+  print(ct)
+  plotlist[[modify_annot(ct)]] = list()
+  cd = pb_list[[ct]]
+  for(cm in unique(my_gsea_res$comp)[ rename_tp(unique(my_gsea_res$comp)) %in% comps] ) {
+    if(cm == "postR2")
+      next
+    # Subset to tp of interest (pair)
+    cd_tmp = cd %>% select(contains(c("preATI", cm))) %>% select(contains(meta$pid_tp))
+    feats=names(which(rowMeans(cpm(cd_tmp) > 1) > 0.4))
+    print(length(feats))
+    cd_tmp = cd_tmp[feats,]
+    cd_tmp = as.data.frame(cpm(cd_tmp))
+    # Scale the data
+    cd_tmp = apply(cd_tmp, 1, scale) %>% t() %>% as.data.frame() %>% setNames(colnames(cd_tmp))
+    gsea_tmp = my_gsea_res[ my_gsea_res$ctype == ct & my_gsea_res$comp == cm, ]
+    if(nrow(gsea_tmp) == 0)
+      next
+    res = data.frame()
+    for(p in gsea_tmp$pathway) {
+      lgenes = unlist(str_split(gsea_tmp$leadingEdge[gsea_tmp$pathway == p], ", "))
+      if(sum(! lgenes %in% rownames(cd_tmp)) > 0) {
+        warning(paste0(ct, "_", cm, ":", p, ":missing genes ", sum(! lgenes %in% rownames(cd_tmp))))
+        warning( paste0( setdiff(lgenes, rownames(cd_tmp)), collapse=", "))
+      }
+      lgenes = lgenes[ lgenes %in% rownames(cd_tmp) ]
+      score = colMeans(cd_tmp[lgenes,])
+      res = rbind(res, data.frame(
+        pid=str_extract(names(score), "^\\d+"), 
+        tp=str_extract(names(score), "[^_]+$"),
+        score = score,
+        p = p
+      ))
+    }
+    res = pivot_wider(res, names_from=p, values_from=score)
+    res = as.data.frame(res)
+    res$tp = rename_tp(res$tp)
+    cm2 = rename_tp(cm)
+    rownames(res) = paste0(res$pid, "_", res$tp)
+
+    colnames(res)[3:ncol(res)] = paths_short[colnames(res)[3:ncol(res)]]
+
+    stars = c()
+    for(i in 3:ncol(res)){ 
+        p=wilcox.test( res[res$tp == "preATI",i], res[res$tp == cm2,i])$p.value
+        s = ""
+        if(p < 0.05)
+          s = "*"
+        stars = c(stars, s)
+    }
+    colnames(res)[3:ncol(res)] = paste0(colnames(res)[3:ncol(res)], stars)
+
+    cluster_cols = ncol(res) > 3
+    
+    #ha = ComplexHeatmap::rowAnnotation(
+    #  vl = vl$VL[ match( rownames(res), rename_tp(vl$pid_tp) )],
+    #  col = list(
+    #    vl = circlize::colorRamp2(range(vl$VL), c("white","orange"))
+    #  )
+    #)
+    
+    #plotlist[[paste0(ct, "#", cm)]] = 
+    plotlist[[modify_annot(ct)]][[cm2]] = 
+      ComplexHeatmap::Heatmap(res[,3:ncol(res), drop=F], 
+                              cluster_columns = cluster_cols, 
+                              row_split = factor(res$tp, levels=c("preATI",cm2)), 
+                              cluster_row_slices = FALSE, 
+                              #left_annotation = ha, 
+                              width = unit(0.2*(ncol(res)-2), "in" ), 
+                              height = unit(0.2*(nrow(res)-2), "in" ) )
+  }
+}
+
+plotlist_bwTP = plotlist
+
+```
+
+
+```{r reorganize heatmaps for select timepoint and celltype - between TP}
+
+#### Fig S7
+
+p = "HALLMARK_INTERFERON_ALPHA_RESPONSE"
+tp = "preR"
+
+if(p == "HALLMARK_TNFA_SIGNALING_VIA_NFKB" & tp == 'bNAb') {
+  ctypes = tnf_bnab_ctypes
+  out_file = paste0("../../../../10x/dge_analysis/gene_signature_heatmaps_bwTP_tnf_",tp,"_v1.pdf")
+  path_idx = 1
+} else if(p == "HALLMARK_TNFA_SIGNALING_VIA_NFKB" & tp == 'preR') {
+  ctypes = tnf_prer_ctypes
+  out_file = paste0("../../../../10x/dge_analysis/gene_signature_heatmaps_bwTP_tnf_",tp,"_v1.pdf")
+  path_idx = 1
+} else if(p == "HALLMARK_INTERFERON_ALPHA_RESPONSE" & tp == 'bNAb') {
+  ctypes = ifn_bnab_ctypes
+  out_file = paste0("../../../../10x/dge_analysis/gene_signature_heatmaps_bwTP_ifn_",tp,"_v1.pdf")
+  path_idx = 2
+} else if(p == "HALLMARK_INTERFERON_ALPHA_RESPONSE" & tp == 'preR') {
+  ctypes = ifn_prer_ctypes
+  out_file = paste0("../../../../10x/dge_analysis/gene_signature_heatmaps_bwTP_ifn_",tp,"_v1.pdf")
+  path_idx = 2
+}
+
+df = data.frame()
+for(ctype in ctypes) {
+  df = 
+    rbind(df,
+          plotlist_bwTP[[ctype]][[tp]]@matrix %>% 
+          data.frame(check.names = F) %>% 
+          select(contains(paths_short[path_idx])) %>%
+          setNames("score") %>% 
+          mutate(pid_tp = rownames(.), pid=get_pid_from_pidtp(pid_tp), new_pid = update_pid(pid), ct = ctype)
+    )
+}
+
+#df$vl = vl$VL[ match( df$pid_tp, rename_tp(vl$pid_tp) )]
+df$tp = str_extract(df$pid_tp, "[^_]+$")
+df$tp = factor(df$tp, levels = c(tp, "preATI"))
+
+df = pivot_wider(df, names_from = 'ct', values_from = 'score') %>% column_to_rownames('pid_tp')
+
+#ha = ComplexHeatmap::rowAnnotation(
+#  vl = df$vl,
+#  col = list(
+#    vl = circlize::colorRamp2(range(vl$VL), c("white","orange"))
+#  )
+#)
+
+#data_clm = 5:ncol(df)
+data_clm = 4:ncol(df)
+
+p = ComplexHeatmap::Heatmap(
+    df[,data_clm, drop=F], 
+    cluster_columns = FALSE, 
+    row_split = df$tp, 
+    cluster_row_slices = FALSE,
+    #left_annotation = ha, 
+    width = unit(0.2*(length(data_clm)), "in" ), 
+    height = unit(0.2*(nrow(df)), "in" ),
+    show_column_dend = FALSE,
+    show_row_dend = FALSE,
+    column_title = paste0(tp,":",paths_short[path_idx]),
+    row_labels = df$new_pid
+    )
+
+pdf(out_file,width=8,height=8)
+print(p)
+dev.off()
+```
+
+
+
+```{r leading-edge log2 diff heatmap - bw TP }
+
+#### Fig 5C,D
+
+# Selected leading-edge genes to plot
+ifn_bwTP_bNAb = c("TRIM21","TRAFD1","OASL","MOV10","LY6E","LGALS3BP","ISG20","IL15","IFITM3","IFIT3","IFIT2","IFIH1","IFI44","DHX58","TRIM25","RTP4","RSAD2","IFI44L","GBP2","CSF1","CMTR1")
+
+ifn_bwTP_preR = c("TRAFD1","TAP1","STAT2","PLSCR1","ISG20","IFIT3","IFIH1","CASP1","GBP4","RSAD2","OASL","IFIT2","HERC6","CXCL10","GBP2","IL15","MOV10","CSF1","IRF2","TRIM21","PSMB8","IRF7","IRF9","C1S","CXCL11","TRIM25","PSME2","ISG15","PSMB9","IFI30","B2M","CMPK2","IL7","BATF2","DDX60","TRIM5","TRIM26","IFI44","OAS1","IFITM3","DHX58","IFI35","SP110","USP18","PARP12","MX1","LGALS3BP","LAMP3","IFI44L","HLA-C")
+
+tnf_bwTP_bNAb = c("IFNGR2","BCL3","TRAF1","GPR183","TNFSF9","RELA","PTX3","CSF1","CCL20","NFKBIA","IL18","CEBPD","CD80","TNF","IL7R","IL15RA","CD69","CCL5","IL6ST","IL1B","IL1A","ICOSLG","CXCL3","CCL2","BCL6","TLR2","IFIT2","NFKB2","IRF1")
+
+tnf_bwTP_preR = c("TRAF1","TLR2","TAP1","IL6ST","IFIH1","CXCL3","NFKB2","CXCL2","IL7R","IL1A","TNFRSF9","RIGI","RELA","IL15RA","IFIT2","CXCL10","BCL3","TNF","CD80","CSF1","GPR183","CCL4","IL6","ICOSLG","ICAM1","CCL2","CXCL11","CD69","IFNGR2","IL1B","IL18","MYC","CXCL1","CCL20")
+
+
+tp = 'bNAb'
+path = "HALLMARK_TNFA_SIGNALING_VIA_NFKB"
+#path = "HALLMARK_INTERFERON_ALPHA_RESPONSE"
+
+if(path == "HALLMARK_TNFA_SIGNALING_VIA_NFKB") {
+  path_short = "TNF-a signaling NFKB"
+  if(tp == 'bNAb') {
+    ctypes = tnf_bnab_ctypes
+    genes = tnf_bwTP_bNAb
+    out_file = paste0("../../../../10x/dge_analysis/leading_edge_log2fc_heatmap_bwTP_tnfa_",tp,".pdf")
+  } else if(tp == 'preR') {
+    ctypes = tnf_prer_ctypes
+    genes = tnf_bwTP_preR
+    out_file = paste0("../../../../10x/dge_analysis/leading_edge_log2fc_heatmap_bwTP_tnfa_",tp,".pdf")
+  }
+} else if(path == "HALLMARK_INTERFERON_ALPHA_RESPONSE") {
+  path_short = "IFNa response"
+  if(tp == 'bNAb') {
+    ctypes = ifn_bnab_ctypes
+    genes = ifn_bwTP_bNAb
+    out_file = paste0("../../../../10x/dge_analysis/leading_edge_log2fc_heatmap_bwTP_ifna_",tp,".pdf")
+  } else if(tp == 'preR') {
+    ctypes = ifn_prer_ctypes
+    genes = ifn_bwTP_preR
+    out_file = paste0("../../../../10x/dge_analysis/leading_edge_log2fc_heatmap_bwTP_ifna_",tp,".pdf")
+  }
+}
+
+my_gsea_res = all_gsea_res_bwTP[ all_gsea_res_bwTP$pathway %in% path & !is.na(all_gsea_res_bwTP$padj) & all_gsea_res_bwTP$padj < 0.1, ]
+
+my_gsea_res$comp = rename_tp(gsub("_vs_preATI","",my_gsea_res$comp))
+
+
+
+df = data.frame()
+for(ctype in ctypes) {
+  gsea_idx = my_gsea_res$ctype == ctype & my_gsea_res$comp == tp
+  if(sum(gsea_idx) != 1) {
+    stop("Found more than 1 matching gsea results for ", tp, ":", ctype)
+  } 
+  le_genes = intersect(genes, unlist(str_split(my_gsea_res$leadingEdge[gsea_idx], ", ")))
+  tmp_df = all_dge_logfc_bwTP[[paste0(tp, "#", ctype)]][le_genes,,drop=F] %>% 
+    na.omit() %>% rownames_to_column("gene") %>%
+    mutate(ctype = ctype)
+  df = rbind(df, tmp_df)
+}
+
+df = pivot_wider(df, names_from = gene, values_from = logFC) %>% column_to_rownames("ctype")
+if(ncol(df) != length(genes)) {
+  warning("Missing a few genes in ", tp, "\n", paste0(genes[! genes %in% colnames(df)], collapse = ","), "\n")
+}
+
+col_fun = circlize::colorRamp2(c( min(-1, min(df, na.rm = T)), 0, max( max(df, na.rm = T), 1) ), c("blue", "white", "red"))
+
+p = ComplexHeatmap::Heatmap(df,
+    width = unit(0.25*(ncol(df)-4), "in" ), 
+    height = unit(0.2*(nrow(df)), "in" ),
+    col = col_fun,
+    show_column_dend = FALSE,
+    show_row_dend = FALSE,
+    column_title = paste0(tp, ":", path_short),
+    cluster_columns = FALSE,
+    heatmap_legend_param = list(title=paste0("log2(",tp,"/preATI)"))
+    )
+
+pdf(out_file, width=15, height=6)
+print(p)
+dev.off()
+
+
+```
+
+

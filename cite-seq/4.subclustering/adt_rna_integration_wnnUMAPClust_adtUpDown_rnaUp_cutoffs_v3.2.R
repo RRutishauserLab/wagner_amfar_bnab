@@ -113,7 +113,7 @@ remove_cc_cor_genes = TRUE # Remove genes correlated with 4 cell-cycle-related g
 xygenes_file = "/krummellab/data1/rpatel5/data/10X_ref_v5.0.0/chrXY_genes.tsv"
 TCR_gene_regex = "^TR[ABDG][VJC]"
 BCR_gene_regex = "^IG[HKL][VJC]|IGH[ADEGM]"
-# Genes correlated with 4 cell-cycle-related genes
+# Genes correlated with 4 cell-cycle-related genes. Generated ccgene_cor_genes.rds using finding_genes_correlated_with_cellCycleGenes.R
 cor_dfs = readRDS(file.path(out_dir,"ccgene_cor_genes.rds"))
 cc_cor_genes = na.omit(unique(unlist(lapply(cor_dfs, function(x) x$gene[ abs(x$cor) > 0.2]))))
 

@@ -1,0 +1,198 @@
+---
+title: "CyTOF-NULISA association analysis"
+author: "Ravi K. Patel"
+date: "2026-07-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r load packages}
+
+library(tidyverse)
+
+```
+
+
+```{r association analysis cytof and nulisa features}
+
+#### Fig 6
+
+library(tidyverse)
+library(Hmisc)
+load("/krummellab/data1/DSCoLab/AMFAR/analysis/integration/preprocessed_data/processed_data_allsamples_woRiboMitoGenes_changedPseudocount_woBaseline_correctedAb_DFsforMOFA_2026-04-15.RData", verbose=T)
+
+# Features to include
+nulisa = c("CCL21","IL18R1","LAMP3","ICOSLG","TNFRSF4","TNFRSF13C","IL12B","CD80","IFNA1; IFNA13","IFNW1","IFNA2")
+
+cytof = c("cDC2_CD40","cDC2_CD71","cDC2_CD86","cDC1_CD71","cDC1_CD86","pDCs_CD86","pDCs_CD40","CD14posCD16negmono_CD71","CD14posCD16posmono_CD71","nnCD8_Ki67","nnCD8_CD38HLADR","naiveBcells_CD71","transitionalBcells_CD71","CD27negIgDneg_CD71","IgDnegIgMneg_CD71","plasmablast_CD86","naiveBcells_CD86","transitionalBcells_CD86","CD27negIgDneg_CD86","IgDnegIgMneg_CD86")
+
+
+#### Load and format the latest CyTOF data
+cyt = readxl::read_excel("/krummellab/data1/DSCoLab/AMFAR/analysis/integration/data/data_from_Box/data_for_corr/20260711_Data for GG.xlsx", sheet="20260509_CyTOF Data")
+
+cyt$Timepoint_DS = case_when(
+    cyt$Timepoint_DS == "PreATI" ~ "preATI",
+    cyt$Timepoint_DS == "Vaccinal" ~ "vaccinal",
+    cyt$Timepoint_DS == "PreR" ~ "preR",
+    cyt$Timepoint_DS == "PostR1" ~ "postR",
+    TRUE ~ cyt$Timepoint_DS
+    )
+
+cyt = cyt[ cyt$Timepoint_DS %in% c("preATI","vaccinal","preR","postR"), ]
+
+cyt = cyt[ match( paste(s_meta$pid, s_meta$tp), paste(cyt$PID, cyt$Timepoint_DS) ), ]
+cyt$sample = NULL
+cyt$PID = NULL
+cyt$PID_New = NULL
+cyt$Timepoint_DS = NULL
+cyt$Timepoint_NEW = NULL
+cyt$COUNT_P1 = NULL
+cyt$COUNT_P2 = NULL
+
+datasets_mofa$cytof_new = t(cyt) %>% as.data.frame() %>% setNames(paste0(s_meta$pid, "_", s_meta$tp))
+
+cytof[( ! cytof %in% rownames(datasets_mofa$cytof))]
+cytof[( ! cytof %in% rownames(datasets_mofa$cytof_new))]
+
+
+
+#### Load and format Nulisa data
+format_tp <- function(tp) {
+  tp = ifelse(tp == "Baseline", "baseline", tp)
+  tp = ifelse(tp == "Vaccinal", "vaccinal", tp)
+  tp = ifelse(tp == "postR1", "postR", tp)
+  return(tp)
+}
+
+# Read in NULISA data
+s1 = readxl::read_excel("/krummellab/data1/DSCoLab/AMFAR/analysis/integration/data/data_from_Box/Data for MOFA/NULISA.xlsx", sheet = 1)
+s1$id = paste0(s1$PID, "_", s1$timepoint)
+s1 = s1[s1$PID != "SC" & s1$SampleQC == "PASS",]
+
+
+# Read-in relevant timepoint info.
+smpls = readxl::read_excel("/krummellab/data1/DSCoLab/AMFAR/analysis/integration/data/data_from_Box/Data for MOFA/20260330_Data Compiled.xlsx", sheet = "NULISASeq", skip = 3)
+smpls$`Sample Designation` = format_tp(smpls$`Sample Designation`)
+smpls$id = paste0(smpls$PID, "_", smpls$`NULISA Data Name`)
+smpls$formatted_id = paste0(smpls$PID, "_", smpls$`Sample Designation`)
+
+# Add formatted_id to s1
+s1$formatted_id = smpls$formatted_id[ match(s1$id, smpls$id) ]
+
+# Prepare and preprocess nulisa data frames
+nulisa_counts = s1[ s1$id %in% smpls$id, c("formatted_id","Target","NPQ") ]  %>% 
+  pivot_wider(names_from = Target, values_from = NPQ) %>% 
+  column_to_rownames("formatted_id")
+nulisa_smeta = s1[ s1$id %in% smpls$id, c("formatted_id","PlateID") ] %>% unique()
+nulisa_smeta = nulisa_smeta[ match( rownames(nulisa_counts), nulisa_smeta$formatted_id), ] %>% dplyr::rename("id" = "formatted_id")
+
+
+nulisa_counts = nulisa_counts[ match( paste0(s_meta$pid, "_", s_meta$tp), rownames(nulisa_counts) ), ]
+rownames(nulisa_counts) = paste0(s_meta$pid, "_", s_meta$tp)
+
+datasets_mofa$nulisa_new = t(nulisa_counts)
+
+nulisa[( ! nulisa %in% rownames(datasets_mofa$nulisa))]
+nulisa[( ! nulisa %in% rownames(datasets_mofa$nulisa_new))]
+
+
+#### Run correlation analysis for differences (log2FC) between timepoints
+# Calculated log2FC for cytof and substracted values for Nulisa since the protein data is already in log2 space.
+tp1 = "preATI"
+tp2 = "vaccinal"
+idx = s_meta$tp %in% c(tp1, tp2)
+
+
+
+df_cyt = datasets_mofa$cytof_new[cytof, idx] %>% t() %>% cbind(s_meta[idx, c("pid","tp")]) %>% arrange(pid)
+pid_to_use = names(which(table(df_cyt$pid) == 2))
+df_tp1 = df_cyt %>% filter( tp == tp1 ) %>% dplyr::slice( match(pid_to_use, pid) ) %>% mutate(pid=NULL, tp=NULL)
+df_tp2 = df_cyt %>% filter( tp == tp2 ) %>% dplyr::slice( match(pid_to_use, pid) ) %>% mutate(pid=NULL, tp=NULL)
+df_cyt_diff = log2((df_tp2+1) / (df_tp1+1))
+
+df_nulisa = datasets_mofa$nulisa_new[nulisa, idx] %>% t() %>% cbind(s_meta[idx, c("pid","tp")]) %>% arrange(pid)
+pid_to_use = names(which(table(df_nulisa$pid) == 2))
+df_tp1 = df_nulisa %>% filter( tp == tp1 ) %>% dplyr::slice( match(pid_to_use, pid) ) %>% mutate(pid=NULL, tp=NULL)
+df_tp2 = df_nulisa %>% filter( tp == tp2 ) %>% dplyr::slice( match(pid_to_use, pid) ) %>% mutate(pid=NULL, tp=NULL)
+df_nulisa_diff = df_tp2 - df_tp1
+
+df_diff = cbind(df_cyt_diff, df_nulisa_diff)
+
+if(FALSE) {
+    df = rbind(
+        datasets_mofa$cytof_new[cytof, idx],
+        datasets_mofa$nulisa_new[nulisa, idx]
+    ) %>% t() %>%
+    cbind(s_meta[idx, c("pid","tp")])
+
+    pid_to_use = names(which(table(df$pid) == 2))
+
+    df_tp1 = df %>% filter( tp == tp1 ) %>% slice( match(pid_to_use, pid) ) %>% mutate(pid=NULL, tp=NULL)
+    df_tp2 = df %>% filter( tp == tp2 ) %>% slice( match(pid_to_use, pid) ) %>% mutate(pid=NULL, tp=NULL)
+    df_diff = log2((df_tp2+1) / (df_tp1+1))
+}
+
+smpl_idx = complete.cases(df_diff)
+df_diff = df_diff[ smpl_idx, ]
+
+cor_res = data.frame()
+for(i in 1:(ncol(df_diff)-1)) {
+  for(j in (i+1):ncol(df_diff)) {
+    t = cor.test(df_diff[,i], df_diff[,j], method="spearman")
+    cor_res = rbind(cor_res, data.frame(f1=colnames(df_diff)[i], f2=colnames(df_diff)[j], p=t$p.value, rho=t$estimate))
+  }
+}
+cor_res$padj = p.adjust(cor_res$p, "BH")
+cor_res$lbl = ifelse(cor_res$padj < 0.1, "**", ifelse(cor_res$p < 0.05, "*", ""))
+write.csv(
+  cor_res %>% dplyr::filter(p < 0.05),
+  paste0("/krummellab/data1/DSCoLab/AMFAR/analysis/integration/targetted_comparisons/association_nulisa_cytof_", tp2, "_", tp1, "_signif.csv")
+)
+rho_mat = cor_res[,c("f1","f2","rho")] %>% pivot_wider(names_from=f1, values_from=rho) %>% column_to_rownames("f2")
+lbl_mat = cor_res[,c("f1","f2","lbl")] %>% pivot_wider(names_from=f1, values_from=lbl) %>% column_to_rownames("f2")
+
+# Cluster the bottom triangle and make a heatmap
+full_rho_mat = rbind(
+    cor_res[, c("f1","f2","rho")], 
+    data.frame(f1 = cor_res$f2, f2 = cor_res$f1, rho = cor_res$rho),
+    data.frame(f1 = unique(c(cor_res$f1, cor_res$f2)), f2 = unique(c(cor_res$f1, cor_res$f2)), rho = 1)
+    ) %>% pivot_wider(names_from=f1, values_from=rho) %>% column_to_rownames("f2")
+full_rho_mat = full_rho_mat[ sort(colnames(full_rho_mat)), sort(colnames(full_rho_mat)) ]
+
+full_lbl_mat = rbind(
+    cor_res[, c("f1","f2","lbl")], 
+    data.frame(f1 = cor_res$f2, f2 = cor_res$f1, lbl = cor_res$lbl),
+    data.frame(f1 = unique(c(cor_res$f1, cor_res$f2)), f2 = unique(c(cor_res$f1, cor_res$f2)), lbl = "**")
+    ) %>% pivot_wider(names_from=f1, values_from=lbl) %>% column_to_rownames("f2")
+full_lbl_mat = full_lbl_mat[ sort(colnames(full_lbl_mat)), sort(colnames(full_lbl_mat)) ]
+
+
+# Convert correlation to a distance metric (1 - r)
+hc = hclust(as.dist(1 - full_rho_mat))
+ordered_feat = rownames(full_rho_mat)[hc$order]
+
+ordered_rho_mat = full_rho_mat[hc$order, hc$order]
+ordered_lbl_mat = full_lbl_mat[hc$order, hc$order]
+
+# Mask/set the upper triangle and diagonal to NA
+ordered_rho_mat[upper.tri(ordered_rho_mat)] <- NA
+ordered_lbl_mat[upper.tri(ordered_lbl_mat)] <- NA
+diag(ordered_rho_mat) <- NA
+diag(ordered_lbl_mat) <- NA
+
+my_colors = colorRampPalette(c("blue", "white", "red"))(100)
+my_breaks = seq(-1, 1, length.out = 101)
+
+pdf(paste0("/krummellab/data1/DSCoLab/AMFAR/analysis/integration/targetted_comparisons/association_nulisa_cytof_", tp2, "_", tp1, ".pdf"))
+pheatmap::pheatmap(ordered_rho_mat, display_numbers=ordered_lbl_mat, color=my_colors, breaks=my_breaks, main=paste0(tp2, "/", tp1), cluster_cols=F, cluster_rows=F)
+dev.off()
+
+```
+
+
+
+

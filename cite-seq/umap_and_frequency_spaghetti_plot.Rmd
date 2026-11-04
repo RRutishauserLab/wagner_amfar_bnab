@@ -1,0 +1,123 @@
+---
+title: "frequency spaghetti plots"
+author: "Ravi K. Patel"
+date: "2026-05-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r load packages}
+
+library(Seurat)
+library(tidyverse)
+
+```
+
+```{r}
+
+tp_order = c("preATI", "bNAb", "preR", "postR")
+plot_style = read.csv("/krummellab/data1/DSCoLab/AMFAR/analysis/sample_metadata/plot_style.csv")
+
+sobjs_all = readRDS("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/5.merged_annotation_final_object_v1/sobj_final_v1.rds")
+sobjs_all = subset(sobjs_all, cells = Cells(sobjs_all)[ 
+    (sobjs_all$fine_annotation != "NK_platelet") & 
+    (sobjs_all$tp != "postR2") & 
+    !(sobjs_all$pid == "35933" & sobjs_all$tp == "postR1") & 
+    !(sobjs_all$pid == "60610" & sobjs_all$tp == "UD2") & 
+    !(sobjs_all$pid == "60610" & sobjs_all$tp == "UD1") ])
+sobjs_all$tp = gsub("postR1", "postR", sobjs_all$tp)
+sobjs_all$tp = gsub("vaccinal", "bNAb", sobjs_all$tp)
+sobjs_all$pid_tp = gsub("postR1", "postR", sobjs_all$pid_tp)
+sobjs_all$pid_tp = gsub("vaccinal", "bNAb", sobjs_all$pid_tp)
+
+sobjs_all@meta.data$fine_annotation_ori = sobjs_all@meta.data$fine_annotation
+sobjs_all@meta.data$fine_annotation = modify_annot(sobjs_all@meta.data$fine_annotation_ori)
+
+sobjs_all@meta.data$broad_annotation_new = case_when(
+    grepl("gdT", sobjs_all$fine_annotation) ~ "gdT",
+    grepl("MAIT", sobjs_all$fine_annotation) ~ "MAIT",
+    TRUE ~ sobjs_all@meta.data$broad_annotation_new
+    )
+
+sobjs_all@meta.data$broad_annotation_new = gsub("manualSubset_","", sobjs_all@meta.data$broad_annotation_new)
+
+make_umap <- function(amfar, group.by) {
+    amfar@meta.data[,group.by] = ifelse(is.na(amfar@meta.data[,group.by]), "Unlabelled", amfar@meta.data[,group.by])
+    levels = setdiff(unique(amfar@meta.data[,group.by]), "Unlabelled")
+    if(length(levels) <= 21) {
+        colors = c(pals::kelly(length(levels)+1)[-1] %>% setNames(levels), "Unlabelled"=pals::kelly(1) )
+    } else {
+        colors = c(c(pals::kelly(22)[-1], pals::alphabet(length(levels)-21)) %>% unname() %>% setNames(levels), "Unlabelled"=pals::kelly(1) )
+    }
+    p = DimPlot(amfar,reduction="wnn.umap_harmony", group.by=group.by) + scale_color_manual(values=colors )
+    return(p)
+}
+
+p = make_umap(sobjs_all, group.by = "fine_annotation")
+pdf("umap_v3_fine_annotation_woJunk.pdf", width=13, height=6); p; dev.off()
+
+p = make_umap(sobjs_all, group.by = "broad_annotation_new")
+pdf("umap_v3_broad_annotation_woJunk.pdf", width=7, height=6); p; dev.off()
+
+sobjs_all$freq_out_total_annot = ifelse( sobjs_all$broad_annotation_new == "Myeloid", sobjs_all$fine_annotation, sobjs_all$broad_annotation_new)
+
+freq = as.data.frame(
+  table( sobjs_all$pid_tp, sobjs_all$pid, sobjs_all$tp, sobjs_all$freq_out_total_annot, sobjs_all$broad_annotation_new )
+  ) %>% 
+setNames(c("pid_tp","pid","tp","annot","broad","Freq")) %>%
+dplyr::filter(Freq > 0) %>% 
+group_by(pid_tp) %>% 
+mutate(
+  pct = Freq/sum(Freq)*100
+  ) %>% ungroup()
+
+freq$tp = factor(as.character(freq$tp), levels=tp_order)
+freq$annot = factor(as.character(freq$annot), levels=c("cMo","ncMo_cd16mid","ncMo_cd16high","cDC1","cDC2","pDC","B","CD4","CD8","NK","gdT","MAIT","HSPC"))
+
+
+pdf("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/5.merged_annotation_final_object_v1/spaghetty_freq_plot_out_of_live.pdf", width=14, height=12)
+ggplot(freq, aes(tp, pct, color=pid, group=pid)) + 
+geom_line(linewidth=0.5) + geom_point(aes(shape=pid), size=3) + 
+theme_classic() + scale_color_manual(values=plot_style$color %>% setNames(plot_style$pid))  + 
+scale_shape_manual(values=plot_style$shape %>% setNames(plot_style$pid)) + facet_wrap(~annot, scale="free") + 
+theme(axis.text.x=element_text(angle=45, hjust=1, vjust=1)) + labs(y="% of live")
+dev.off()
+
+
+
+# % by broad population
+freq = as.data.frame(
+  table( sobjs_all$pid_tp, sobjs_all$pid, sobjs_all$tp, sobjs_all$fine_annotation, sobjs_all$broad_annotation_new )
+  ) %>% 
+setNames(c("pid_tp","pid","tp","annot","broad_annot","Freq")) %>%
+dplyr::filter(broad_annot %in% c("B","CD4","CD8","NK")) %>%
+dplyr::filter(Freq > 0) %>% 
+group_by(pid_tp, broad_annot) %>% 
+mutate(
+  pct = Freq/sum(Freq)*100
+  ) %>% ungroup()
+freq$tp = factor(as.character(freq$tp), levels=tp_order)
+freq$annot = factor(as.character(freq$annot), levels=all_ct)
+
+pdf("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/5.merged_annotation_final_object_v1/spaghetty_freq_plot_fine_annot_outOfBroadAnnot.pdf", width=8, height=6)
+for(broad in unique(freq$broad_annot)) {
+    freq2 = filter(freq, broad_annot == broad)
+    freq2$annot = droplevels(freq2$annot)
+    p = ggplot(freq2, aes(tp, pct, color=pid, group=pid)) + 
+    geom_line(linewidth=0.5) + 
+    geom_point(aes(shape=pid), size=3) + 
+    theme_classic() + scale_color_manual(values=plot_style$color %>% setNames(plot_style$pid))  + 
+    scale_shape_manual(values=plot_style$shape %>% setNames(plot_style$pid)) + 
+    ggforce::facet_wrap_paginate(~annot, scale="free", nrow=3, ncol=4) + 
+    theme(axis.text.x=element_text(angle=45, hjust=1, vjust=1)) + 
+    labs(y = paste0("% of ", gsub("manualSubset_","",broad)))
+    print(p)
+}
+dev.off()
+
+
+```

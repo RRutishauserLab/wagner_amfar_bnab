@@ -1,0 +1,183 @@
+---
+title: "TCR/BCR data preprocessing"
+output: html_notebook
+---
+
+```{r load packages and seurat objects}
+
+library(Seurat)
+library(tidyverse)
+
+#sobjs_all_cd8 = readRDS("sobjs_all_final.rds")
+sobjs_all = readRDS("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/3.rna_integration_wnnUMAPClust_adtUpDown_rnaUp_cutoffs_v3/sobjs_all_final_wRes0.6_sub9_sub12.rds")
+
+# Adding broad annotation to the full object
+annot = read.csv("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/3.rna_integration_wnnUMAPClust_adtUpDown_rnaUp_cutoffs_v3/annotation_res0.6.csv")
+sobjs_all$broad_annot = annot$broad_annotation[ match( sobjs_all$wsnn_harmony_res.0.6_sub, annot$cluster ) ]
+
+
+```
+
+
+### Preprocessing of TCR data
+
+1. Reading in the TCR data for all pools
+2. Removing the chains that are not productive
+3. Defining the chain as vgene_jgene_cdr3
+4. Plotting length distribution for TRA and TRB chains
+
+There are no chains shorter than 5 aa, but there are a few chains longer than 22 aa. Removing all chains longer than 22 aa.
+```{r}
+
+tcr = data.frame()
+for(i in 1:15) {
+  tcr = rbind(tcr, 
+    read.csv(paste0("/krummellab/data1/immunox/AMFAR/processed_vdj_data/AMFAR-POOL-RR",i,"-SCG1/vdj_t/all_contig_annotations.csv")) %>% mutate(barcode = paste0("AMFAR-POOL-RR",i,"-SCG1_", barcode))
+    )
+}
+tcr_hq = tcr[tcr$barcode %in% Cells(sobjs_all) & tcr$productive == 'true', ]
+tcr_hq$vjcdr3 = paste0(tcr_hq$v_gene, "_", tcr_hq$j_gene, "_", tcr_hq$cdr3)
+
+# Calculating cdr3 length
+tcr_hq = tcr_hq %>% mutate(c3len = nchar(cdr3))
+
+# Plotting length distribution for TRA and TRB chains
+tcr_hq %>% ggplot(aes(as.factor(c3len))) + geom_bar() + theme_classic() + facet_wrap(~chain)
+
+# Removing chains longer than 22 aa
+tcr_hq = tcr_hq[ tcr_hq$c3len <= 22, ]
+
+```
+
+
+```{r}
+#tcr_hq = tcr[tcr$barcode %in% Cells(sobjs_all_cd8) & tcr$productive == 'true', ]
+#tcr_hq$vjcdr3 = paste0(tcr_hq$v_gene, "_", tcr_hq$j_gene, "_", tcr_hq$cdr3)
+
+
+clonotype_tcr_file = "/krummellab/data1/DSCoLab/AMFAR/analysis/10x/3.rna_integration_wnnUMAPClust_adtUpDown_rnaUp_cutoffs_v3/clonotype_tcr.rds"
+if(file.exists(clonotype_tcr_file)) {
+  clonotype_tcr = readRDS(clonotype_tcr_file) 
+} else {
+  clonotype_hq = data.frame()
+  bc_count = 0
+  for(bc in unique(tcr_hq$barcode)) {
+    bc_count = bc_count + 1
+    if(bc_count %% 1000 == 0)
+      cat(bc_count, "/", length(unique(tcr_hq$barcode)), "\n")
+    tmp = tcr_hq[ tcr_hq$barcode == bc, ] %>% arrange(chain)
+    all_vjc3 = ""
+    all_c3 = ""
+    for(i in seq_len(nrow(tmp))) {
+      all_vjc3 = paste0(all_vjc3, tmp$chain[i], ":", tmp$vjcdr3[i], ";")
+      all_c3 = paste0(all_c3, tmp$chain[i], ":", tmp$cdr3[i], ";")
+    }
+    clonotype_hq = rbind(
+      clonotype_hq,
+      data.frame(barcode=bc, tcr_vjcdr3=all_vjc3, tcr_cdr3 = all_c3, tra_count = sum(tmp$chain == "TRA"), trb_count = sum(tmp$chain == "TRB")))
+  }
+  
+  clonotype_hq_tcr = clonotype_hq
+  saveRDS(clonotype_hq_tcr, "/krummellab/data1/DSCoLab/AMFAR/analysis/10x/3.rna_integration_wnnUMAPClust_adtUpDown_rnaUp_cutoffs_v3/clonotype_tcr.rds")
+}
+
+
+
+# Bar plot of chain type freq 
+p = data.frame(
+  nchain = paste0("a", clonotype_tcr$tra_count, "-b", clonotype_tcr$trb_count)
+  ) %>% ggplot(aes(nchain)) + geom_bar() + theme_classic() + theme(axis.text.x = element_text(angle=45, hjust=1, vjust=1))
+
+pct_format = scales::percent_format(accuracy = .1)
+
+p + geom_text(
+    aes(
+        label = sprintf(
+            '%d (%s)',
+            ..count..,
+            pct_format(..count.. / sum(..count..))
+        )
+    ),
+    stat = 'count',
+    nudge_y = 5000, nudge_x = 0.4,
+    colour = 'black',
+    size = 3, angle=25, vjust=1
+)
+
+
+
+
+# Bar plot of chain type freq by broad cell type, restricting to chain types with > 1000 counts.
+p2 = data.frame(
+  nchain = paste0("a", clonotype_tcr$tra_count, "-b", clonotype_tcr$trb_count), 
+  annot = sobjs_all$broad_annot[ match(clonotype_tcr$barcode, Cells(sobjs_all) ) ]
+  ) %>% 
+  dplyr::filter(nchain %in% names(which(table(nchain) > 1000)) ) %>% 
+  ggplot(aes(nchain, fill=annot)) + geom_bar() + theme_classic() + theme(axis.text.x = element_text(angle=45, hjust=1, vjust=1)) + scale_fill_manual(values = pals::kelly(22)[-1])
+
+pct_format = scales::percent_format(accuracy = .1)
+
+p2 + ggrepel::geom_text_repel(
+    aes(
+        label = sprintf(
+            '%d\n%s',
+            ..count..,
+            pct_format(..count.. / sum(..count..))
+        )
+    ),
+    stat = 'count', position = position_stack(0.5), 
+    colour = 'black',
+    size = 3, angle=0
+)
+
+
+```
+
+
+```{r}
+
+bcr = data.frame()
+for(i in 1:15) {
+  bcr = rbind(bcr, 
+    read.csv(paste0("/krummellab/data1/immunox/AMFAR/processed_vdj_data/AMFAR-POOL-RR",i,"-SCG1/vdj_b/all_contig_annotations.csv")) %>% mutate(barcode = paste0("AMFAR-POOL-RR",i,"-SCG1_", barcode))
+    )
+}
+bcr_hq = bcr[bcr$barcode %in% Cells(sobjs_all) & bcr$productive == 'true', ]
+bcr_hq$vjcdr3 = paste0(bcr_hq$v_gene, "_", bcr_hq$j_gene, "_", bcr_hq$cdr3)
+
+bcr_hq %>% mutate(c3len = nchar(cdr3)) %>% ggplot(aes(as.factor(c3len))) + geom_bar() + theme_classic() + facet_wrap(~chain) + theme(axis.text.x = element_text(angle=45, hjust=1, vjust=1))
+
+#bcr_hq = bcr[bcr$barcode %in% Cells(sobjs_all_cd8) & bcr$productive == 'true', ]
+#bcr_hq$vjcdr3 = paste0(bcr_hq$v_gene, "_", bcr_hq$j_gene, "_", bcr_hq$cdr3)
+
+clonotype_hq = data.frame()
+bc_count = 0
+for(bc in unique(bcr_hq$barcode)) {
+  bc_count = bc_count + 1
+  if(bc_count %% 1000 == 0)
+    cat(bc_count, "/", length(unique(bcr_hq$barcode)), "\n")
+  tmp = bcr_hq[ bcr_hq$barcode == bc, ] %>% arrange(chain)
+  all_vjc3 = ""
+  all_c3 = ""
+  for(i in seq_len(nrow(tmp))) {
+    all_vjc3 = paste0(all_vjc3, tmp$chain[i], ":", tmp$vjcdr3[i], ";")
+    all_c3 = paste0(all_c3, tmp$chain[i], ":", tmp$cdr3[i], ";")
+  }
+  clonotype_hq = rbind(
+    clonotype_hq,
+    data.frame(barcode=bc, bcr_vjcdr3=all_vjc3, bcr_cdr3 = all_c3, igh_count = sum(tmp$chain == "IGH"), igk_count = sum(tmp$chain == "IGK"), igl_count = sum(tmp$chain == "IGL")))
+}
+
+# Add to metadata
+#sobjs_all_cd8 = AddMetaData(sobjs_all_cd8, metadata=column_to_rownames(clonotype_hq, "barcode"))
+#sobjs_all_cd8$igh_count[ is.na(sobjs_all_cd8$igh_count) ] = 0
+#sobjs_all_cd8$igk_count[ is.na(sobjs_all_cd8$igk_count) ] = 0
+#sobjs_all_cd8$igl_count[ is.na(sobjs_all_cd8$igl_count) ] = 0
+clonotype_hq_bcr = clonotype_hq
+saveRDS(clonotype_hq_bcr, "/krummellab/data1/DSCoLab/AMFAR/analysis/10x/3.rna_integration_wnnUMAPClust_adtUpDown_rnaUp_cutoffs_v3/clonotype_bcr.rds")
+
+
+```
+
+
+

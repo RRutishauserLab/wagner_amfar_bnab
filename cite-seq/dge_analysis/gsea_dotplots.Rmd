@@ -1,0 +1,164 @@
+---
+title: "GSEA dotplots"
+author: "Ravi K. Patel"
+date: "2026-07-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r load packages}
+
+library(tidyverse)
+
+```
+
+
+```{r panel 5B}
+
+#### Fig 5B
+
+
+gsea_files = c(
+list.files("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/dge_analysis/vaccinal_vs_preATI/", pattern="v2_nestedBatchRandom_", full.name=T) %>% grep("gsea.csv", ., value=T),
+list.files("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/dge_analysis/preR_vs_preATI/", pattern="v2_nestedBatchRandom_", full.name=T) %>% grep("gsea.csv", ., value=T),
+list.files("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/dge_analysis/postR1_vs_preATI/", pattern="v2_nestedBatchRandom_", full.name=T) %>% grep("gsea.csv", ., value=T),
+list.files("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/dge_analysis/postR2_vs_preATI/", pattern="v2_nestedBatchRandom_", full.name=T) %>% grep("gsea.csv", ., value=T)
+)
+
+
+all_gsea_res = data.frame()
+for(f in gsea_files) {
+  if(file.info(f)$size == 3) {
+    print(paste0(f, " is empty. Skipping"))
+    next
+  }
+  ct = gsub("v2_nestedBatchRandom_|_gsea.csv", "", basename(f))
+  comp = str_extract(f, "[^/]+_vs_[^/]+")
+  d = read.csv(f) %>% select(c("pathway","pval","padj","NES","db"))
+  dup_path = d$pathway[duplicated(d$pathway)]
+  d = d[ ! (d$pathway %in% dup_path & d$db == "customDB"), ]
+  d$ctype = ct
+  d$comp = comp
+  all_gsea_res = rbind(all_gsea_res, d)
+}
+all_gsea_res$ctype = gsub("_deseq","",all_gsea_res$ctype)
+
+
+
+# Removing pathways of customDB1 that are also present in other databases.
+customDB1_paths = unique(all_gsea_res$pathway[all_gsea_res$db == "customDB1"])
+customDB1_redundant_paths = intersect(customDB1_paths, all_gsea_res$pathway[all_gsea_res$db != "customDB1"])
+all_gsea_res = all_gsea_res[ !(all_gsea_res$pathway %in% customDB1_redundant_paths & all_gsea_res$db == "customDB1"), ]
+
+
+paths = c("HALLMARK_INTERFERON_ALPHA_RESPONSE","HALLMARK_TNFA_SIGNALING_VIA_NFKB","REACTOME_ANTIGEN_PRESENTATION_FOLDING_ASSEMBLY_AND_PEPTIDE_LOADING_OF_CLASS_I_MHC","HALLMARK_IL6_JAK_STAT3_SIGNALING","HALLMARK_MYC_TARGETS_V1","REACTOME_TRANSLATION")
+paths_short = c("IFNa response","TNF-a signaling NFKB","Ag presentation folding and classI loading","IL6 JAK STAT3 sig.","Myc targets","Translation") %>%
+    setNames(paths)
+
+
+#paths = c("Cohn_ERRP")
+#paths_short = c("Cohn_ERRP") %>%
+#    setNames(paths)
+
+
+my_gsea_res = all_gsea_res[ all_gsea_res$pathway %in% paths & !is.na(all_gsea_res$padj) & all_gsea_res$padj < 0.1 , ]
+my_gsea_res$comp = gsub("_vs_preATI","",my_gsea_res$comp) 
+#my_gsea_res$comp = case_when( my_gsea_res$comp == "vaccinal" ~ "bNAb", my_gsea_res$comp == "postR1" ~ "postR", TRUE ~ my_gsea_res$comp  )
+#my_gsea_res$comp = factor(my_gsea_res$comp, levels=c("bNAb","preR", "postR"))
+my_gsea_res$comp = factor( rename_tp(my_gsea_res$comp), levels=tp_order[-1])
+my_gsea_res$pathway = paths_short[my_gsea_res$pathway]
+my_gsea_res$pathway = factor(my_gsea_res$pathway, levels=paths_short)
+my_gsea_res$ctype = factor(modify_annot(my_gsea_res$ctype), levels=rev(all_ct))
+final_ct_list = c("cMo","ncMo_cd16mid","ncMo_cd16high","cDC2","pDC","NK_mature_cytotoxic","NK_immature_2","NK_adaptive_1","B_naive","B_mem_switched","Plasmablasts","CD4_naive","CD4_memory_NOS","CD4_cycling","CD8_naive","CD8_Tcm","CD8_Tem_1","CD8_Tem_2","CD8_Tem_activated")
+my_gsea_res = my_gsea_res[ my_gsea_res$ctype %in% final_ct_list & my_gsea_res$comp != "postR2",  ]
+my_gsea_res$ctype = factor(modify_annot(my_gsea_res$ctype), levels=rev(final_ct_list))
+my_gsea_res = na.omit(my_gsea_res)
+p = ggplot(my_gsea_res, aes(comp, ctype, size=-log10(padj), color=NES)) +
+    geom_point() + theme_classic() + 
+    scale_color_distiller(palette="RdBu") + 
+    theme(axis.text.x=element_text(angle=45, hjust=1, vjust=1)) + 
+    facet_wrap(~pathway, nrow=1) + 
+    theme(strip.text.x = element_text(size = 6))
+pdf("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/dge_analysis/Bubble_Plot_Pathways_v3.2_vs_preATI_allCelltypes.pdf", width=7, height=5)
+p
+dev.off()
+write.csv(my_gsea_res, "/krummellab/data1/DSCoLab/AMFAR/analysis/10x/dge_analysis/Bubble_Plot_Pathways_v3.2_vs_preATI_allCelltypes.csv")
+
+
+#pdf("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/dge_analysis/Bubble_Plot_Pathways_v4-CohnERRP_vs_preATI_allCelltypes.pdf", width=4, height=4)
+#p
+#dev.off()
+
+```
+
+
+
+```{r panel 7A}
+
+#### Fig 7A
+
+library(tidyverse)
+gsea_files = c(
+list.files("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/dge_analysis/CvsNC_preATI/", pattern="v3_DESeq2woBatch_", full.name=T) %>% grep("gsea.csv", ., value=T),
+list.files("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/dge_analysis/CvsNC_vaccinal/", pattern="v3_DESeq2woBatch_", full.name=T) %>% grep("gsea.csv", ., value=T),
+list.files("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/dge_analysis/CvsNC_preR/", pattern="v3_DESeq2woBatch_", full.name=T) %>% grep("gsea.csv", ., value=T),
+list.files("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/dge_analysis/CvsNC_postR1/", pattern="v3_DESeq2woBatch_", full.name=T) %>% grep("gsea.csv", ., value=T),
+list.files("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/dge_analysis/CvsNC_postR2/", pattern="v3_DESeq2woBatch_", full.name=T) %>% grep("gsea.csv", ., value=T)
+)
+
+all_gsea_res = data.frame()
+for(f in gsea_files) {
+  if(file.info(f)$size == 3) {
+    print(paste0(f, " is empty. Skipping"))
+    next
+  }
+  ct = gsub("v3_DESeq2woBatch_|_gsea.csv", "", basename(f))
+  comp = gsub("CvsNC_","",str_extract(f, "CvsNC_[^/]+"))
+  d = read.csv(f) %>% select(c("pathway","padj","NES","db"))
+  dup_path = d$pathway[duplicated(d$pathway)]
+  d = d[ ! (d$pathway %in% dup_path & d$db == "customDB"), ]
+  d$ctype = ct
+  d$comp = comp
+  all_gsea_res = rbind(all_gsea_res, d)
+}
+
+# Removing pathways of customDB1 that are also present in other databases.
+customDB1_paths = unique(all_gsea_res$pathway[all_gsea_res$db == "customDB1"])
+customDB1_redundant_paths = intersect(customDB1_paths, all_gsea_res$pathway[all_gsea_res$db != "customDB1"])
+all_gsea_res = all_gsea_res[ !(all_gsea_res$pathway %in% customDB1_redundant_paths & all_gsea_res$db == "customDB1"), ]
+
+
+paths = c("HALLMARK_TNFA_SIGNALING_VIA_NFKB","HALLMARK_INFLAMMATORY_RESPONSE") #,"LABCD8_TCM_v_TEM_UP","LABCD8_YFV_Mem_vs_Eff_UP","LABCD8_YFV_Naive_vs_Eff_UP")
+paths_short = c("TNF-a signaling NFKB","Inflam response") %>% #,"TCM/TEM","YFV mem/eff", "YFV naive/eff") %>%
+    setNames(paths)
+
+ctypes = c("cMo","ncMo_cd16_mid","ncMo_cd16_high","cDC2","pDC","B_IgM+IgD+","B_mem_not_switched","CD4_naive","CD4_memory_NOS","CD4_Treg","CD8_naive","CD8_Tem_1","NK_adaptive_1","NK_adaptive_2")
+my_gsea_res = all_gsea_res[ all_gsea_res$pathway %in% paths & !is.na(all_gsea_res$padj) & all_gsea_res$padj < 0.1 & all_gsea_res$ctype %in% ctypes , ]
+my_gsea_res$comp = factor( rename_tp(my_gsea_res$comp), levels=tp_order)
+my_gsea_res$pathway = paths_short[my_gsea_res$pathway]
+my_gsea_res$pathway = factor(my_gsea_res$pathway, levels=paths_short)
+my_gsea_res$ctype = factor(modify_annot(my_gsea_res$ctype), levels=rev(all_ct))
+final_ct_list = ctypes
+my_gsea_res = my_gsea_res[ my_gsea_res$ctype %in% final_ct_list & my_gsea_res$comp != "postR2",  ]
+my_gsea_res$ctype = factor(modify_annot(my_gsea_res$ctype), levels=rev(final_ct_list))
+my_gsea_res = na.omit(my_gsea_res)
+p = ggplot(my_gsea_res, aes(comp, ctype, size=-log10(padj), color=NES)) +
+    geom_point() + theme_classic() + 
+    scale_color_distiller(palette="RdBu") + 
+    theme(axis.text.x=element_text(angle=45, hjust=1, vjust=1)) + 
+    facet_wrap(~pathway, nrow=1) + 
+    theme(strip.text.x = element_text(size = 6))
+
+pdf("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/dge_analysis/Bubble_Plot_Pathways_v4_C_vs_NC_selectCtypes.pdf", width=5, height=3)
+p
+dev.off()
+
+
+
+```
+
+

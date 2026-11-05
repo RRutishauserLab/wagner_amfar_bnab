@@ -1,0 +1,361 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r load packages and data objects}
+
+library(Seurat)
+library(tidyverse)
+library(ggalluvial)
+
+amfar = readRDS("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/5.merged_annotation_final_object_v1/sobj_final_v1.rds")
+
+
+sobjs_all = amfar
+
+sobjs_all = subset(sobjs_all, cells = Cells(sobjs_all)[ 
+    (sobjs_all$fine_annotation != "NK_platelet") & 
+    (sobjs_all$tp != "postR2") & 
+    !(sobjs_all$pid == "35933" & sobjs_all$tp == "postR1") & 
+    !(sobjs_all$pid == "60610" & sobjs_all$tp == "UD2") & 
+    !(sobjs_all$pid == "60610" & sobjs_all$tp == "UD1") ])
+
+
+match_UDs_to_otherTPs <- function(tp) {
+  tp = as.character(tp)
+  tp = case_when(
+    grepl("UD1", tp) ~ gsub("UD1", "preR", tp),
+    grepl("UD2", tp) ~ gsub("UD2", "postR1", tp),
+    TRUE ~ tp
+    )
+  return(tp)
+}
+tp_order = c("preATI", "vaccinal", "preR", "postR1", "postR2")
+plot_style = read.csv("/krummellab/data1/DSCoLab/AMFAR/analysis/sample_metadata/plot_style.csv")
+
+amfar = sobjs_all
+amfar$pid_tp = match_UDs_to_otherTPs(amfar$pid_tp)
+amfar$tp = match_UDs_to_otherTPs(amfar$tp)
+
+
+```
+
+
+### CD8 T cell clonotype dynamics
+```{r cd8 clonotype analysis - final }
+#sobj_cd8 = subset(amfar, subset = broad_annotation_new == "manualSubset_CD8")
+sobj_nncd8 = subset(amfar, subset = fine_annotation %in% setdiff(unique(amfar$fine_annotation[ amfar$broad_annotation_new == "manualSubset_CD8"]), c("CD8_naive","MAIT","CD8_NKT")) )
+
+downsample = function(tbl, size = 1000, seed=1234, pid_tp) {
+    clonotype_flat = c()
+    for(i in 1:nrow(tbl)) {
+        clonotype_flat = c(clonotype_flat, rep(as.character(tbl$clonotype[i]), tbl$Freq[i]) )    
+    }
+    set.seed(seed)
+    clonotype_flat = sample(clonotype_flat, size = size)
+    return(as.data.frame(table(clonotype_flat)) %>% setNames(c("clonotype","Freq")) %>% mutate(pid_tp = pid_tp))
+}
+
+
+calc_bootstrap_pval = function(freq_tmp_tp1, freq_tmp_tp2, seeds, padj_cutoff = 0.1, l2fc_cutoff = 1) {
+  tp1_total = sum(freq_tmp_tp1$Freq)
+  tp2_total = sum(freq_tmp_tp2$Freq)
+  if(tp1_total == 0 | tp2_total == 0)
+      next
+  all_clonotypes = unique(c(as.vector(freq_tmp_tp1$clonotype), as.vector(freq_tmp_tp2$clonotype)))
+  contract_count = rep(0, length(all_clonotypes)) %>% setNames(all_clonotypes)
+  expand_count = rep(0, length(all_clonotypes)) %>% setNames(all_clonotypes)
+  for(seed in seeds) {
+    if(downsample_larger) {
+      if(tp1_total > tp2_total) {
+        freq_tp1 = downsample(
+          freq_tmp_tp1, tp2_total, 
+          seed=seed, pid_tp = freq_tmp_tp1$pid_tp[1])
+        freq_tp2 = freq_tmp_tp2
+      } else if(tp1_total < tp2_total) {
+        freq_tp2 = downsample(
+          freq_tmp_tp2, tp1_total, 
+          seed=seed, pid_tp = freq_tmp_tp2$pid_tp[1])
+        freq_tp1 = freq_tmp_tp1
+      } else {
+        freq_tp1 = freq_tmp_tp1
+        freq_tp2 = freq_tmp_tp2
+      }
+    }
+    freq_tmp = full_join(
+      freq_tp1[,c("Freq","clonotype")] %>% rename(Freq_tp1 = Freq), 
+      freq_tp2[,c("Freq","clonotype")] %>% rename(Freq_tp2 = Freq), 
+      by="clonotype")
+    freq_tmp[ is.na(freq_tmp) ] = 0
+    
+    freq_tmp = freq_tmp %>% mutate(
+      pct_tp1 = (Freq_tp1+1)/sum(Freq_tp1+1)*100,
+      pct_tp2 = (Freq_tp2+1)/sum(Freq_tp2+1)*100
+      )
+  
+    freq_tmp$pval = NA
+    freq_tmp$odds_ratio = NA
+    for(cln in unique(as.vector(freq_tmp$clonotype))) {
+      idx = freq_tmp$clonotype == cln
+      f = freq_tmp[idx,]
+      ft = fisher.test( 
+        matrix(
+          c(f$Freq_tp1, 
+            sum(freq_tmp$Freq_tp1)-f$Freq_tp1, 
+            f$Freq_tp2, 
+            sum(freq_tmp$Freq_tp2)-f$Freq_tp2), 
+          nrow=2) )
+      freq_tmp$pval[idx] = ft$p.value
+      freq_tmp$odds_ratio[idx] = ft$estimate
+    }
+    freq_tmp$l2fc = log2( freq_tmp$pct_tp2 / freq_tmp$pct_tp1 )
+    freq_tmp = arrange(freq_tmp, pval)
+    freq_tmp$padj = p.adjust(freq_tmp$pval, method="BH")
+    freq_tmp$dir = ifelse(
+      freq_tmp$padj < padj_cutoff & freq_tmp$l2fc >= l2fc_cutoff, 
+      "expanded", 
+      ifelse( 
+        freq_tmp$padj < padj_cutoff & freq_tmp$l2fc <= -1*l2fc_cutoff, 
+        "contracted", 
+        "ns"
+        )  
+      )
+    signif_expand = as.vector(freq_tmp$clonotype[ freq_tmp$dir == "expanded"])
+    signif_contract = as.vector(freq_tmp$clonotype[ freq_tmp$dir == "contracted"])
+    if(length(signif_expand) > 0) {
+      expand_count[signif_expand] = expand_count[signif_expand] + 1
+    }
+    if(length(signif_contract) > 0) {
+      contract_count[signif_contract] = contract_count[signif_contract] + 1
+    }
+  }
+  return(list(last_freq_tmp=freq_tmp, contract_count=contract_count, expand_count=expand_count))
+}
+
+
+freq = as.data.frame(table(sobj_nncd8@meta.data[ , c("pid_tp","tcr_clonotype_aa") ] %>% na.omit())) %>% filter(Freq > 0) %>% rename("clonotype"="tcr_clonotype_aa")
+freq$pid = str_extract(freq$pid_tp, "^\\d+")
+freq$tp = factor(str_extract(freq$pid_tp, "[^_]+$"), levels=tp_order)
+
+downsample_larger = TRUE
+niter = 100
+set.seed(1234)
+seeds = sample(1:niter, replace=F)
+
+tp1 = "preATI"
+tp2 = "preR"
+pval_cutoff = 0.01
+padj_cutoff = 0.1
+l2fc_cutoff = 1
+plotlist = list()
+signif_change = data.frame()
+all_res = data.frame()
+for( p in sort(unique(freq$pid)) ) {
+  print(p)
+  freq_tmp_tp1 = freq[ freq$pid == p & freq$tp %in% c(tp1), ]
+  freq_tmp_tp2 = freq[ freq$pid == p & freq$tp %in% c(tp2), ]
+  if(nrow(freq_tmp_tp1) == 0 | nrow(freq_tmp_tp2) == 0) {
+    next
+  }
+  if(TRUE) { # Calculate log2FC using the full dataset
+    freq_tmp = full_join(
+      freq_tmp_tp1[,c("Freq","clonotype")] %>% rename(Freq_tp1 = Freq),
+      freq_tmp_tp2[,c("Freq","clonotype")] %>% rename(Freq_tp2 = Freq), 
+      by="clonotype")
+    freq_tmp[ is.na(freq_tmp) ] = 0
+    
+    freq_tmp = freq_tmp %>% mutate(
+      pct_tp1 = (Freq_tp1+1)/sum(Freq_tp1+1)*100, 
+      pct_tp2 = (Freq_tp2+1)/sum(Freq_tp2+1)*100, 
+      )
+
+    freq_tmp$pval = NA
+    freq_tmp$odds_ratio = NA
+    for(cln in unique(freq_tmp$clonotype)) {
+        idx = freq_tmp$clonotype == cln
+        f = freq_tmp[idx,]
+        ft = fisher.test( matrix(c(f$Freq_tp1, sum(freq_tmp$Freq_tp1)-f$Freq_tp1, f$Freq_tp2, sum(freq_tmp$Freq_tp2)-f$Freq_tp2), nrow=2) )
+        freq_tmp$pval[idx] = ft$p.value
+        freq_tmp$odds_ratio[idx] = ft$estimate
+    }
+    freq_tmp$l2fc = log2( freq_tmp$pct_tp2 / freq_tmp$pct_tp1 )
+    freq_tmp = arrange(freq_tmp, pval)
+    freq_tmp$padj = p.adjust(freq_tmp$pval, method="BH")
+    freq_tmp$dir = ifelse(
+      freq_tmp$padj < padj_cutoff & freq_tmp$l2fc >= l2fc_cutoff, 
+      "expanded", 
+      ifelse( 
+        freq_tmp$padj < padj_cutoff & freq_tmp$l2fc <= -1*l2fc_cutoff, 
+        "contracted", 
+        "ns"
+        )  
+      )
+  }
+  bootstrap_signif = calc_bootstrap_pval(freq_tmp_tp1, freq_tmp_tp2, seeds = seeds, padj_cutoff = padj_cutoff, l2fc_cutoff = l2fc_cutoff)
+  bts_signif_clonotypes = ifelse(bootstrap_signif$contract_count > niter/2, "contracted", ifelse( bootstrap_signif$expand_count > niter/2, "expanded", "ns" ))
+  #freq_tmp = bootstrap_signif$last_freq_tmp
+  freq_tmp$bootstrap_dir = bts_signif_clonotypes[ as.vector(freq_tmp$clonotype) ]
+  all_res = rbind(all_res, freq_tmp %>% mutate(p=p))
+  signif_change = rbind(signif_change, freq_tmp[ freq_tmp$bootstrap_dir != "ns", ] %>% mutate(p=p) )
+  plotlist[[p]] = ggplot(freq_tmp, aes(log10(pct_tp1), log10(pct_tp2), color=bootstrap_dir, label=clonotype)) + 
+      geom_point(aes(alpha=bootstrap_dir), size=3) + theme_classic() + 
+      scale_color_manual(values=c("contracted"="blue", "expanded"="red", "ns"="grey80")) + 
+      geom_abline(slope = 1, intercept = 0) + 
+      labs(title=p, x=paste0("log10(",tp1,")"), y=paste0("log10(",tp2,")")) +
+      scale_alpha_manual(values=c("contracted"=1, "expanded"=1, "ns"=0.2)) +
+      ggrepel::geom_text_repel(data = freq_tmp %>% dplyr::filter(bootstrap_dir != "ns"))
+}
+
+pdf(paste0("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/5.merged_annotation_final_object_v1/tcr_analysis/nncd8_", tp1, "_vs_", tp2, ".pdf"), width=10, height=6)
+ggpubr::ggarrange(plotlist = plotlist)
+dev.off()
+
+
+
+# Combining all PID plots into one.
+df = data.frame()
+for(p in names(plotlist)){
+    df = rbind(df, plotlist[[p]]$data %>% mutate(pid = p) )
+}
+df = df %>% mutate(label = paste0(pid, ":", clonotype))
+plot = ggplot(df, aes(log10(pct_tp1), log10(pct_tp2), color=bootstrap_dir, label=label)) + 
+    geom_point(aes(alpha=bootstrap_dir), size=3) + theme_classic() + 
+    scale_color_manual(values=c("contracted"="blue", "expanded"="red", "ns"="grey80")) + 
+    geom_abline(slope = 1, intercept = 0) + 
+    labs(title="All pids combined", x=paste0("log10(",tp1,")"), y=paste0("log10(", ifelse(tp2 == "vaccinal", "bNAb", tp2) ,")")) +
+    scale_alpha_manual(values=c("contracted"=1, "expanded"=1, "ns"=0.2)) +
+    ggrepel::geom_text_repel(data = df %>% dplyr::filter(bootstrap_dir != "ns"))
+
+pdf(paste0("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/5.merged_annotation_final_object_v1/tcr_analysis/nncd8_", tp1, "_vs_", tp2, "_pidsCombined_v2.pdf"), width=7, height=6)
+plot
+dev.off()
+
+
+```
+
+
+
+### CD4 T cell clonotype dynamics
+```{r cd4 clonotype analysis - final }
+
+sobj_nncd4 = subset(amfar, subset = fine_annotation %in% setdiff(unique(amfar$fine_annotation[ amfar$broad_annotation_new == "manualSubset_CD4"]), c("CD4_naive","CD4_naive_SOX4","Treg")) )
+
+freq = as.data.frame(table(sobj_nncd4@meta.data[ , c("pid_tp","tcr_clonotype_aa") ] %>% na.omit())) %>% filter(Freq > 0) %>% rename("clonotype"="tcr_clonotype_aa")
+freq$pid = str_extract(freq$pid_tp, "^\\d+")
+freq$tp = factor(str_extract(freq$pid_tp, "[^_]+$"), levels=tp_order)
+
+downsample_larger = TRUE
+niter = 100
+set.seed(1234)
+seeds = sample(1:niter, replace=F)
+
+tp1 = "preATI"
+tp2 = "vaccinal"
+pval_cutoff = 0.01
+padj_cutoff = 0.1
+l2fc_cutoff = 1
+plotlist = list()
+signif_change = data.frame()
+all_res = data.frame()
+for( p in sort(unique(freq$pid)) ) {
+  print(p)
+  freq_tmp_tp1 = freq[ freq$pid == p & freq$tp %in% c(tp1), ]
+  freq_tmp_tp2 = freq[ freq$pid == p & freq$tp %in% c(tp2), ]
+  if(nrow(freq_tmp_tp1) == 0 | nrow(freq_tmp_tp2) == 0) {
+    next
+  }
+  if(TRUE) { # Calculate log2FC using the full dataset
+    freq_tmp = full_join(
+      freq_tmp_tp1[,c("Freq","clonotype")] %>% rename(Freq_tp1 = Freq),
+      freq_tmp_tp2[,c("Freq","clonotype")] %>% rename(Freq_tp2 = Freq), 
+      by="clonotype")
+    freq_tmp[ is.na(freq_tmp) ] = 0
+    
+    freq_tmp = freq_tmp %>% mutate(
+      pct_tp1 = (Freq_tp1+1)/sum(Freq_tp1+1)*100, 
+      pct_tp2 = (Freq_tp2+1)/sum(Freq_tp2+1)*100, 
+      )
+
+    freq_tmp$pval = NA
+    freq_tmp$odds_ratio = NA
+    for(cln in unique(freq_tmp$clonotype)) {
+        idx = freq_tmp$clonotype == cln
+        f = freq_tmp[idx,]
+        ft = fisher.test( matrix(c(f$Freq_tp1, sum(freq_tmp$Freq_tp1)-f$Freq_tp1, f$Freq_tp2, sum(freq_tmp$Freq_tp2)-f$Freq_tp2), nrow=2) )
+        freq_tmp$pval[idx] = ft$p.value
+        freq_tmp$odds_ratio[idx] = ft$estimate
+    }
+    freq_tmp$l2fc = log2( freq_tmp$pct_tp2 / freq_tmp$pct_tp1 )
+    freq_tmp = arrange(freq_tmp, pval)
+    freq_tmp$padj = p.adjust(freq_tmp$pval, method="BH")
+    freq_tmp$dir = ifelse(
+      freq_tmp$padj < padj_cutoff & freq_tmp$l2fc >= l2fc_cutoff, 
+      "expanded", 
+      ifelse( 
+        freq_tmp$padj < padj_cutoff & freq_tmp$l2fc <= -1*l2fc_cutoff, 
+        "contracted", 
+        "ns"
+        )  
+      )
+  }
+  bootstrap_signif = calc_bootstrap_pval(freq_tmp_tp1, freq_tmp_tp2, seeds = seeds, padj_cutoff = padj_cutoff, l2fc_cutoff = l2fc_cutoff)
+  bts_signif_clonotypes = ifelse(bootstrap_signif$contract_count > niter/2, "contracted", ifelse( bootstrap_signif$expand_count > niter/2, "expanded", "ns" ))
+  #freq_tmp = bootstrap_signif$last_freq_tmp
+  freq_tmp$bootstrap_dir = bts_signif_clonotypes[ as.vector(freq_tmp$clonotype) ]
+  all_res = rbind(all_res, freq_tmp %>% mutate(p=p))
+  signif_change = rbind(signif_change, freq_tmp[ freq_tmp$bootstrap_dir != "ns", ] %>% mutate(p=p) )
+  plotlist[[p]] = ggplot(freq_tmp, aes(log10(pct_tp1), log10(pct_tp2), color=bootstrap_dir, label=clonotype)) + 
+      geom_point(aes(alpha=bootstrap_dir), size=3) + theme_classic() + 
+      scale_color_manual(values=c("contracted"="blue", "expanded"="red", "ns"="grey80")) + 
+      geom_abline(slope = 1, intercept = 0) + 
+      labs(title=p, x=paste0("log10(",tp1,")"), y=paste0("log10(",tp2,")")) +
+      scale_alpha_manual(values=c("contracted"=1, "expanded"=1, "ns"=0.2)) +
+      ggrepel::geom_text_repel(data = freq_tmp %>% dplyr::filter(bootstrap_dir != "ns"))
+}
+
+pdf(paste0("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/5.merged_annotation_final_object_v1/tcr_analysis/nncd4_", tp1, "_vs_", tp2, ".pdf"), width=10, height=6)
+ggpubr::ggarrange(plotlist = plotlist)
+dev.off()
+
+
+
+
+# Combining all PID plots into one.
+df = data.frame()
+for(p in names(plotlist)){
+    df = rbind(df, plotlist[[p]]$data %>% mutate(pid = p) )
+}
+df = df %>% mutate(label = paste0(pid, ":", clonotype))
+plot = ggplot(df, aes(log10(pct_tp1), log10(pct_tp2), color=bootstrap_dir, label=label)) + 
+    geom_point(aes(alpha=bootstrap_dir), size=3) + theme_classic() + 
+    scale_color_manual(values=c("contracted"="blue", "expanded"="red", "ns"="grey80")) + 
+    geom_abline(slope = 1, intercept = 0) + 
+    labs(title="All pids combined", x=paste0("log10(",tp1,")"), y=paste0("log10(", ifelse(tp2 == "vaccinal", "bNAb", tp2) ,")")) +
+    scale_alpha_manual(values=c("contracted"=1, "expanded"=1, "ns"=0.2)) +
+    ggrepel::geom_text_repel(data = df %>% dplyr::filter(bootstrap_dir != "ns"))
+
+pdf(paste0("/krummellab/data1/DSCoLab/AMFAR/analysis/10x/5.merged_annotation_final_object_v1/tcr_analysis/nncd4_", tp1, "_vs_", tp2, "_pidsCombined_v2.pdf"), width=7, height=6)
+plot
+dev.off()
+
+
+
+```
+
+### Find median and range of number of non-naive Ts with valid TCR per sample 
+```{r}
+
+df = rbind(
+  data.frame(pid_tp = sobj_nncd8$pid_tp, tcr = sobj_nncd8$tcr_clonotype_aa),
+  data.frame(pid_tp = sobj_nncd4$pid_tp, tcr = sobj_nncd4$tcr_clonotype_aa)
+)
+
+median(table(df$pid_tp[ ! is.na(df$tcr) ]))
+range(table(df$pid_tp[ ! is.na(df$tcr) ]))
+
+
+```
+
+
